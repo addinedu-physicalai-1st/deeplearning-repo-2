@@ -16,9 +16,31 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Focus Monitor Orchestrator")
 
-API_KEY = os.getenv("API_KEY", "default-secret-key")
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise RuntimeError("ENVIRONMENT ERROR: API_KEY is not set in .env file.")
+
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+# Middleware: Limit Request Size (15MB)
+# Orchestrator might handle slightly larger payloads if passing through multiple models
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import Request
+
+class LimitUploadSize(BaseHTTPMiddleware):
+    def __init__(self, app, max_upload_size: int):
+        super().__init__(app)
+        self.max_upload_size = max_upload_size
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "POST":
+            content_length = request.headers.get("content-length")
+            if content_length and int(content_length) > self.max_upload_size:
+                raise HTTPException(status_code=413, detail="Payload too large")
+        return await call_next(request)
+
+app.add_middleware(LimitUploadSize, max_upload_size=15_000_000) # 15MB
 
 async def get_api_key(header_api_key: str = Depends(api_key_header)):
     if header_api_key == API_KEY:

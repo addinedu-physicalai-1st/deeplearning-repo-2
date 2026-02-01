@@ -212,3 +212,6 @@ app/data/*.db
 # Virtual environments
 app/venv/
 app/.venv/
+
+# VSCode
+.vscode/

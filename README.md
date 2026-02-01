@@ -11,7 +11,7 @@
 ```mermaid
 graph TD
     Client[Client GUI - PyQt6] <--> Orch[Orchestrator - FastAPI]
-    Orch <--> AI_Head[AI Head Pose - FastAPI]
+    Orch <--> AI_Head[AI Head Pose - YOLOv8 Pose]
     Orch <--> AI_Emotion[AI Emotion - FastAPI]
     Orch <--> AI_Body[AI Upper Body - FastAPI]
     Orch <--> DB[DB Server - SQLite]
@@ -20,17 +20,20 @@ graph TD
 
 1.  **Client (PyQt6)**: 실시간 웹캠 프리뷰, 주기적 이미지 캡처 및 전송, 비집중 알림 시각화.
 2.  **Orchestrator (FastAPI)**: 요청 분배, 다중 모델 결과 집계(Aggregation), 최종 비집중 판정 알고리즘 수행.
-3.  **AI Models**: 비전 AI 기반의 개별 추론 서버 (고개 각도, 감정, 상체 자세).
+3.  **AI Head (YOLOv8 Pose)**: YOLOv8 Pose 모델을 이용한 실시간 고개 각도 추정 및 사용자 추적(Tracking).
 4.  **Feedback AI**: 세션 데이터 기반 맞춤형 코멘트 생성 (Ollama/Llama 3.1).
 
 ---
 
 ## 📌 주요 기능
 
-*   **실시간 집중도 모니터링**: 3~5초 주기로 사용자의 상태를 분석하여 집중 여부 판정.
-*   **다중 지표 분석**: 고개 숙임/돌림(Head Pose), 표정(Emotion), 어깨 기울기(Body Pose)를 복합적으로 고려.
+*   **실시간 집중도 모니터링**: 3초 주기로 사용자의 상태를 분석하여 집중 여부 판정.
+*   **고도화된 Head Pose 분석 (YOLOv8)**:
+    *   **Pitch, Yaw, Roll 추정**: 안면 키포인트를 활용한 정밀한 각도 계산.
+    *   **타겟 잠금 및 추적 (Target Locking)**: 여러 사람이 포착되어도 모니터링 대상을 고정하여 지속적으로 추적.
+    *   **이탈/산만함 감지**: 고개 숙임, 옆보기 등 설정된 임계값을 벗어난 동작 실시간 감지.
 *   **즉각적인 피드백**: 비집중 상태 감지 시 화면 오버레이를 통해 주의 환기 유도.
-*   **통계 및 AI 코칭**: 세션 종료 후 집중 시간 비율 시각화 및 LLM 기반 행동 교정 팁 제공.
+*   **보안 강화**: API Key 인증 및 요청 데이터 크기 제한을 통한 안정적인 서버 운영.
 
 ---
 
@@ -41,7 +44,7 @@ deeplearning-repo-2/
 ├── apps/
 │   ├── client/           # [UI] PyQt6 데스크탑 애플리케이션
 │   ├── orchestrator/     # [Control] 중앙 제어 서버
-│   ├── ai_head/          # [Vision] Head Pose 분석 서버 (작업 중)
+│   ├── ai_head/          # [Vision] YOLOv8 기반 Head Pose 분석 서버
 │   ├── ai_emotion/       # [Vision] 표정 분석 서버 (오픈 소스 예정)
 │   ├── ai_body/          # [Vision] 상체 자세 분석 서버 (오픈 소스 예정)
 │   ├── db_server/        # [Data] SQLite 데이터 관리 서버
@@ -60,8 +63,8 @@ deeplearning-repo-2/
 *   **Environment**: `uv` (Fast Python package manager)
 *   **GUI**: PyQt6, OpenCV
 *   **Backend**: FastAPI, Uvicorn, HTTPX (Async communication)
-*   **AI/Vision**: MediaPipe, NumPy, Pydantic (Data validation)
-*   **Database**: SQLite
+*   **AI/Vision**: **YOLOv8 Pose**, Ultralytics, NumPy, Pydantic
+*   **Security**: API Key Header Auth, Request Size Limit Middleware
 
 ---
 
@@ -99,9 +102,10 @@ uv run python src/client/main.py
 
 ---
 
-## 🔒 보안 설정
-본 시스템은 서버 간 통신 보호를 위해 `X-API-Key` 헤더를 통한 간단한 인증을 수행합니다.
-각 앱의 `.env` 파일에 동일한 `API_KEY`가 설정되어 있어야 정상적으로 통신이 가능합니다.
+## 🔒 보안 및 환경 설정
+*   **API 인증**: 모든 서버 간 통신은 `X-API-Key` 헤더 인증을 거칩니다.
+*   **환경 변수**: 각 앱의 `.env` 파일에 `API_KEY`가 반드시 설정되어 있어야 합니다.
+*   **데이터 제한**: 서버 안정성을 위해 10MB 이상의 이미지 데이터 전송은 차단됩니다.
 
 ---
 

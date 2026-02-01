@@ -89,7 +89,7 @@ class MainWindow(QMainWindow):
             self.is_monitoring = True
             self.start_button.setText("Stop Monitoring")
             self.status_label.setText("Status: Monitoring...")
-            self.inference_timer.start(3000)  # Every 3 seconds
+            self.inference_timer.start(1000)  # Every 3 seconds
         else:
             self.is_monitoring = False
             self.start_button.setText("Start Monitoring")

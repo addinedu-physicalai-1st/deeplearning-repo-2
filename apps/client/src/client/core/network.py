@@ -6,7 +6,10 @@ from shared.schemas import InferenceRequest, InferenceResponse
 class NetworkClient:
     def __init__(self, orchestrator_url=None, api_key=None):
         self.orchestrator_url = orchestrator_url or os.getenv("ORCHESTRATOR_URL", "http://localhost:8000/inference")
-        self.api_key = api_key or os.getenv("API_KEY", "default-secret-key")
+        self.api_key = api_key or os.getenv("API_KEY")
+        
+        if not self.api_key:
+            print("[!] WARNING: API_KEY is not set. Requests will likely fail.")
 
     def send_inference_request(self, image_base64: str) -> InferenceResponse:
         payload = InferenceRequest(image_base64=image_base64)
