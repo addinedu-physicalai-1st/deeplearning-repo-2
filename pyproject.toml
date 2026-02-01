@@ -1,0 +1,19 @@
+[project]
+name = "focus-monitor-workspace"
+version = "0.1.0"
+description = "Focus Monitor Workspace"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.uv]
+managed = true
+package = false
+
+[tool.uv.workspace]
+members = [
+    "apps/client",
+    "apps/orchestrator",
+    "apps/ai_head",
+    "packages/shared",
+]

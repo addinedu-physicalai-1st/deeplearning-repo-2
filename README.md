@@ -1,103 +1,112 @@
-# Focus Monitor
+# Focus Monitor (업무 집중도 모니터링 시스템)
 
-딥러닝 기반의 실시간 업무 집중 모니터링 및 코칭 시스템입니다. 웹캠을 통해 사용자의 고개 각도(Head Pose)를 분석하여 집중 상태를 판단하고, 세션 종료 후 LLM을 통해 개인화된 피드백을 제공합니다.
+딥러닝 기반의 실시간 업무 집중 모니터링 및 코칭 시스템입니다. 웹캠을 통해 사용자의 상태(고개 각도, 표정, 자세)를 분석하여 집중 상태를 판정하고, 모니터링 종료 후 AI 피드백을 제공합니다.
+
+---
+
+## 🏗 시스템 아키텍처
+
+본 프로젝트는 확장성과 효율성을 위해 **Microservices Architecture (MSA)** 스타일의 구조를 채택하고 있습니다.
+
+```mermaid
+graph TD
+    Client[Client GUI - PyQt6] <--> Orch[Orchestrator - FastAPI]
+    Orch <--> AI_Head[AI Head Pose - FastAPI]
+    Orch <--> AI_Emotion[AI Emotion - FastAPI]
+    Orch <--> AI_Body[AI Upper Body - FastAPI]
+    Orch <--> DB[DB Server - SQLite]
+    DB <--> LLM[LLM Server - Feedback AI]
+```
+
+1.  **Client (PyQt6)**: 실시간 웹캠 프리뷰, 주기적 이미지 캡처 및 전송, 비집중 알림 시각화.
+2.  **Orchestrator (FastAPI)**: 요청 분배, 다중 모델 결과 집계(Aggregation), 최종 비집중 판정 알고리즘 수행.
+3.  **AI Models**: 비전 AI 기반의 개별 추론 서버 (고개 각도, 감정, 상체 자세).
+4.  **Feedback AI**: 세션 데이터 기반 맞춤형 코멘트 생성 (Ollama/Llama 3.1).
+
+---
 
 ## 📌 주요 기능
 
-*   **실시간 집중도 모니터링**: 웹캠을 사용하여 사용자의 얼굴 각도(Pitch, Yaw, Roll)를 실시간으로 추정합니다.
-*   **산만함 감지**: 설정된 임계값을 벗어나는 움직임이 감지되면 산만함(Distraction)으로 기록합니다.
-*   **집중도 점수 계산**: 전체 세션 시간 대비 집중 시간과 산만함 횟수를 기반으로 집중 점수를 산출합니다.
-*   **AI 맞춤형 피드백**: 세션 종료 후, 수집된 데이터를 바탕으로 LLM(Ollama - Llama 3.1등)이 격려 멘트와 구체적인 행동 교정 팁을 제공합니다.
-*   **세션 기록 관리**: 과거 집중 세션의 기록을 데이터베이스에 저장하고 조회할 수 있습니다.
-*   **직관적인 UI**: PyQt6 기반의 데스크탑 애플리케이션으로 제공됩니다.
+*   **실시간 집중도 모니터링**: 3~5초 주기로 사용자의 상태를 분석하여 집중 여부 판정.
+*   **다중 지표 분석**: 고개 숙임/돌림(Head Pose), 표정(Emotion), 어깨 기울기(Body Pose)를 복합적으로 고려.
+*   **즉각적인 피드백**: 비집중 상태 감지 시 화면 오버레이를 통해 주의 환기 유도.
+*   **통계 및 AI 코칭**: 세션 종료 후 집중 시간 비율 시각화 및 LLM 기반 행동 교정 팁 제공.
+
+---
+
+## 📂 프로젝트 구조 (uv Workspace)
+
+```text
+deeplearning-repo-2/
+├── apps/
+│   ├── client/           # [UI] PyQt6 데스크탑 애플리케이션
+│   ├── orchestrator/     # [Control] 중앙 제어 서버
+│   ├── ai_head/          # [Vision] Head Pose 분석 서버 (작업 중)
+│   ├── ai_emotion/       # [Vision] 표정 분석 서버 (오픈 소스 예정)
+│   ├── ai_body/          # [Vision] 상체 자세 분석 서버 (오픈 소스 예정)
+│   ├── db_server/        # [Data] SQLite 데이터 관리 서버
+│   └── llm_server/       # [AI] 피드백 생성 서버
+├── packages/
+│   └── shared/           # [Common] 공통 스키마 및 유틸리티
+├── pyproject.toml        # uv 워크스페이스 설정
+└── README.md
+```
+
+---
 
 ## 🛠 기술 스택
 
 *   **Language**: Python 3.10+
-*   **GUI**: PyQt6
-*   **Computer Vision**: OpenCV, MediaPipe, NumPy
-*   **LLM Integration**: Ollama (Local LLM), Llama 3.1
+*   **Environment**: `uv` (Fast Python package manager)
+*   **GUI**: PyQt6, OpenCV
+*   **Backend**: FastAPI, Uvicorn, HTTPX (Async communication)
+*   **AI/Vision**: MediaPipe, NumPy, Pydantic (Data validation)
 *   **Database**: SQLite
+
+---
 
 ## 📋 설치 및 실행 방법
 
 ### 1. 필수 요구사항
 *   Python 3.10 이상
-*   웹캠 (노트북 내장 카메라 또는 USB 카메라)
-*   **Ollama**: 로컬 LLM 구동을 위해 [Ollama](https://ollama.com/)가 설치되어 있어야 합니다.
+*   `uv` 설치: `pip install uv`
 
-### 2. 프로젝트 설치
-
+### 2. 프로젝트 초기화
 ```bash
-# 저장소 복제
-git clone <repository-url>
-cd deeplearning-repo-2
-```
-
-**방법 1: `uv` 사용 (권장)**
-`uv`는 기존 `pip`보다 훨씬 빠른 Python 패키지 관리 도구입니다.
-
-```bash
-# uv 설치 (이미 설치된 경우 생략)
-pip install uv
-
-# 초기화 및 의존성 동기화
-uv init
+# 의존성 설치 및 가상환경 구축
 uv sync
 ```
 
-**방법 2: `pip` 사용 (기본)**
-`uv`를 사용하지 않을 경우 기존 방식을 사용할 수 있습니다.
+### 3. 서버 실행 (각각의 터미널에서 실행)
 
+**1) AI Head 서버 (Port 8001)**
 ```bash
-pip install -r requirements.txt
-# 또는
-pip install .
+cd apps/ai_head
+uv run python src/ai_head/main.py
 ```
-*`requirements.txt`가 없는 경우 `app/pyproject.toml`을 참고하여 다음 패키지들을 설치하세요:*
+
+**2) 오케스트레이션 서버 (Port 8000)**
 ```bash
-uv add matplotlib mediapipe numpy ollama opencv-python pyqt6 requests
+cd apps/orchestrator
+uv run python src/orchestrator/main.py
 ```
 
-### 3. LLM 모델 준비
-이 프로젝트는 `llama3.1:8b` 모델을 기본으로 사용합니다. 터미널에서 다음 명령어로 모델을 다운로드하세요.
-
+**3) 클라이언트 프로그램**
 ```bash
-ollama pull llama3.1:8b
-```
-*실행 전 `ollama serve` 등으로 Ollama 서비스가 백그라운드에서 실행 중이어야 합니다.*
-
-### 4. 실행
-
-```bash
-# app/src 폴더 내의 main.py 실행
-python app/src/main.py
+cd apps/client
+uv run python src/client/main.py
 ```
 
-## 📂 프로젝트 구조
+---
 
-```
-deeplearning-repo-2/
-├── README.md               # 프로젝트 설명 파일
-├── app/
-│   ├── pyproject.toml      # 프로젝트 의존성 및 설정
-│   └── src/
-│       ├── main.py         # 애플리케이션 진입점 (GUI 실행)
-│       ├── core/           # 핵심 로직 (세션 관리, 비디오 스레드 등)
-│       ├── database/       # 데이터베이스 처리
-│       ├── llm/            # LLM 클라이언트 (Ollama 연동)
-│       ├── ui/             # UI 구성 요소 및 페이지
-│       └── vision/         # 컴퓨터 비전/딥러닝 모델 (MediaPipe FaceMesh)
-└── training/               # 모델 학습 관련 리소스
-```
+## 🔒 보안 설정
+본 시스템은 서버 간 통신 보호를 위해 `X-API-Key` 헤더를 통한 간단한 인증을 수행합니다.
+각 앱의 `.env` 파일에 동일한 `API_KEY`가 설정되어 있어야 정상적으로 통신이 가능합니다.
 
-## ⚠️ 문제 해결
-
-*   **카메라가 작동하지 않는 경우**: 다른 프로그램에서 카메라를 사용 중인지 확인하거나, `opencv` 관련 권한 설정을 확인하세요.
-*   **LLM 응답이 없는 경우**: 터미널에서 `ollama list`를 입력하여 `llama3.1:8b` 모델이 있는지 확인하고, Ollama 서버가 실행 중인지 확인하세요.
+---
 
 ## 👥 팀 정보
-*   딥러닝 프로젝트 2조
+*   **딥러닝 프로젝트 2조**
 
 ---
 © 2026 Focus Monitor Project

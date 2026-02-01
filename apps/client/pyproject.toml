@@ -1,0 +1,23 @@
+[project]
+name = "monitor-client"
+version = "0.1.0"
+description = "Client GUI application"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyqt6>=6.4.0",
+    "opencv-python>=4.7.0",
+    "requests>=2.28.0",
+    "python-dotenv>=1.0.0",
+    "monitor-shared",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/client"]
+
+[tool.uv.sources]
+monitor-shared = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

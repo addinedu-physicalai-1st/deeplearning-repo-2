@@ -1,0 +1,19 @@
+[project]
+name = "monitor-orchestrator"
+version = "0.1.0"
+description = "Orchestrator server"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.95.0",
+    "uvicorn>=0.22.0",
+    "monitor-shared",
+    "httpx>=0.24.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orchestrator"]
+
+[tool.uv.sources]
+monitor-shared = { workspace = true }
