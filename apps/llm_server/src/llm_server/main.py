@@ -71,11 +71,7 @@ def generate_prompt(session_data: dict) -> str:
         f"- 집중 점수: {score}점\n"
         f"- 산만 횟수: {distractions}회\n"
         f"- 감지 모델: {model_type}\n\n"
-        f"반드시 아래 JSON 형식으로만 응답하세요. 다른 말은 하지 마세요.\n"
-        f"{{\n"
-        f"  \"comment\": \"사용자의 감정을 고려한 따뜻한 격려나 위로의 말 (1~2문장)\",\n"
-        f"  \"feedback\": \"데이터에 기반한 구체적이고 실천 가능한 행동 교정 팁 (개조식으로 3가지)\"\n"
-        f"}}"
+        f"사용자의 감정을 고려한 따뜻한 격려나 위로의 말(comment)과 데이터에 기반한 구체적이고 실천 가능한 행동 교정 팁(feedback)을 제공해주세요."
     )
     return prompt
 
@@ -126,26 +122,32 @@ async def generate_feedback(
         prompt = generate_prompt(session_data)
         logger.info(f"Generating feedback for session: score={session_data.get('focus_score')}, duration={session_data.get('duration')}")
         
-        # Call Ollama
+        # Call Ollama with structured output
         try:
             response = ollama.chat(
                 model=OLLAMA_MODEL,
                 messages=[
                     {'role': 'system', 'content': 'You are a helpful coach. Output ONLY valid JSON.'},
                     {'role': 'user', 'content': prompt},
-                ]
+                ],
+                format=FeedbackResponse.model_json_schema()
             )
             
             content = response['message']['content']
             logger.info(f"Received response from Ollama (length: {len(content)})")
             
-            # Parse JSON response
-            parsed = parse_ollama_response(content)
-            
-            return FeedbackResponse(
-                comment=parsed.get("comment", "분석 결과가 없습니다."),
-                feedback=parsed.get("feedback", "피드백이 없습니다.")
-            )
+            # Parse JSON response using Pydantic validation
+            try:
+                parsed = FeedbackResponse.model_validate_json(content)
+                return parsed
+            except Exception as validation_error:
+                logger.warning(f"Pydantic validation failed, trying fallback parsing: {validation_error}")
+                # Fallback to original parsing logic
+                parsed = parse_ollama_response(content)
+                return FeedbackResponse(
+                    comment=parsed.get("comment", "분석 결과가 없습니다."),
+                    feedback=parsed.get("feedback", "피드백이 없습니다.")
+                )
             
         except Exception as e:
             logger.exception(f"Error calling Ollama: {e}")
