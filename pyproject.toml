@@ -15,5 +15,6 @@ members = [
     "apps/client",
     "apps/orchestrator",
     "apps/ai_head",
+    "apps/llm_server",
     "packages/shared",
 ]
