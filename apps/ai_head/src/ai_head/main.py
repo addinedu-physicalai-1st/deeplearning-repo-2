@@ -101,11 +101,31 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
 
     try:
         # Decode base64 image
-        img_data = base64.b64decode(request.image_base64)
+        try:
+            img_data = base64.b64decode(request.image_base64)
+        except Exception:
+            return InferenceResponse(is_distracted=False, status_message="Invalid base64 encoding")
+
+        # Basic Image Signature Check (Magic Numbers)
+        # JPEG: FF D8 FF
+        # PNG: 89 50 4E 47
+        if len(img_data) < 4:
+            return InferenceResponse(is_distracted=False, status_message="Invalid image data (too short)")
+        
+        is_valid_image = (
+            img_data.startswith(b'\xff\xd8\xff') or  # JPEG
+            img_data.startswith(b'\x89PNG') or       # PNG
+            img_data.startswith(b'RIFF')             # WebP (simplified)
+        )
+        
+        if not is_valid_image:
+            logger.warning(f"Potential malicious upload: invalid image signature")
+            return InferenceResponse(is_distracted=False, status_message="Unsupported image format")
+
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if frame is None:
-            return InferenceResponse(is_distracted=False, status_message="Invalid image data")
+            return InferenceResponse(is_distracted=False, status_message="Could not decode image")
 
         # YOLO Tracking
         results = model.track(frame, persist=True, verbose=False)

@@ -70,12 +70,30 @@ class MainPage(QWidget):
         desc.setStyleSheet("font-size: 16px; color: #9E9E9E;")
         card_layout.addWidget(desc)
 
-        start_btn = QPushButton("START NEW SESSION")
-        start_btn.setObjectName("PrimaryBtn")
-        start_btn.clicked.connect(self.start_requested.emit)
-        card_layout.addWidget(start_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Connection Status
+        self.status_label = QLabel("Checking server connection...")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet("color: #FFB74D; font-weight: bold;") # Orange for waiting
+        card_layout.addWidget(self.status_label)
+
+        self.start_btn = QPushButton("START NEW SESSION")
+        self.start_btn.setObjectName("PrimaryBtn")
+        self.start_btn.setEnabled(False) # Disabled by default
+        self.start_btn.setStyleSheet("QPushButton:disabled { background-color: #333; color: #666; }")
+        self.start_btn.clicked.connect(self.start_requested.emit)
+        card_layout.addWidget(self.start_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(card)
+
+    def set_connection_status(self, connected: bool):
+        if connected:
+            self.status_label.setText("Server Connected")
+            self.status_label.setStyleSheet("color: #03DAC6; font-weight: bold;")
+            self.start_btn.setEnabled(True)
+        else:
+            self.status_label.setText("Waiting for Orchestrator...")
+            self.status_label.setStyleSheet("color: #CF6679; font-weight: bold;")
+            self.start_btn.setEnabled(False)
 
 class MonitoringPage(QWidget):
     """실시간 모니터링 화면"""
@@ -228,6 +246,10 @@ class MainWindow(QMainWindow):
         self.preview_timer.timeout.connect(self.update_ui)
         self.preview_timer.start(33)
 
+        self.conn_timer = QTimer()
+        self.conn_timer.timeout.connect(self.check_server_connection)
+        self.conn_timer.start(2000) # Check every 2 seconds
+
         self.inference_timer = QTimer()
         self.inference_timer.timeout.connect(self.request_inference)
 
@@ -248,6 +270,11 @@ class MainWindow(QMainWindow):
         self.is_monitoring = False
         self.inference_timer.stop()
         self.stack.setCurrentWidget(self.main_page)
+
+    def check_server_connection(self):
+        if not self.is_monitoring:
+            connected = self.network_client.check_connection()
+            self.main_page.set_connection_status(connected)
 
     def update_ui(self):
         frame = self.camera.get_frame()

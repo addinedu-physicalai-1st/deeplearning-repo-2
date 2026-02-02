@@ -29,4 +29,14 @@ class NetworkClient:
             return InferenceResponse(**response.json())
         except Exception as e:
             logger.error(f"Error sending request: {e}")
-            return InferenceResponse(is_distracted=False, status_message=f"Error: {str(e)}")
+            return InferenceResponse(is_distracted=False, status_message="Connection Error")
+
+    def check_connection(self) -> bool:
+        try:
+            # Replace /inference with /health for health check
+            health_url = self.orchestrator_url.replace("/inference", "/health")
+            headers = {"X-API-Key": self.api_key}
+            response = requests.get(health_url, headers=headers, timeout=2)
+            return response.status_code == 200
+        except:
+            return False

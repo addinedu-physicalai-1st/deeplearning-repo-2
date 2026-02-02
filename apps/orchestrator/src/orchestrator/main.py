@@ -52,7 +52,13 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         # 1. Rate Limiting
-        client_ip = request.client.host if request.client else "unknown"
+        # Handle proxy environments by checking X-Forwarded-For
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            client_ip = forwarded.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "unknown"
+
         if not check_rate_limit(client_ip):
             return Response("Rate limit exceeded", status_code=429)
 
@@ -92,6 +98,10 @@ async def call_ai_server(client: httpx.AsyncClient, url: str, request: Inference
         logger.exception(f"Exception calling {url}")
         return {"error": "Internal connection error"}
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
 @app.post("/inference", response_model=InferenceResponse)
 async def inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
     async with httpx.AsyncClient() as client:
@@ -109,6 +119,13 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         head_result = results[0]
         # emotion_result = results[1]
         # body_result = results[2]
+
+        if "error" in head_result:
+            return InferenceResponse(
+                is_distracted=False,
+                status_message="Service Unavailable",
+                head_pose=None
+            )
 
         # Simplified Logic for Pipeline Validation:
         # If head pose says distracted, then distracted.
