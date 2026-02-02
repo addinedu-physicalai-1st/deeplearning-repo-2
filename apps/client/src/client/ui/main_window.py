@@ -3,8 +3,8 @@ import cv2
 import time
 import numpy as np
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget)
-from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize
+                             QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication)
+from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QEasingCurve
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont
 import pyqtgraph as pg
 
@@ -107,10 +107,33 @@ class MonitoringPage(QWidget):
         video_card = QFrame()
         video_card.setObjectName("Card")
         video_vbox = QVBoxLayout(video_card)
+        
+        # Container for Video and Overlay
+        self.video_container = QWidget()
+        self.video_container_layout = QGridLayout(self.video_container)
+        self.video_container_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.video_label = QLabel("INITIALIZING...")
         self.video_label.setFixedSize(640, 480)
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        video_vbox.addWidget(self.video_label)
+        self.video_container_layout.addWidget(self.video_label, 0, 0)
+        
+        # Overlay Notification Label
+        self.overlay_label = QLabel("DISTRACTION DETECTED!")
+        self.overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.overlay_label.setStyleSheet("""
+            background-color: rgba(207, 102, 121, 200); 
+            color: white; 
+            font-size: 24px; 
+            font-weight: bold; 
+            border-radius: 10px;
+            padding: 20px;
+        """)
+        self.overlay_label.setFixedSize(400, 100)
+        self.overlay_label.hide()
+        self.video_container_layout.addWidget(self.overlay_label, 0, 0, Qt.AlignmentFlag.AlignCenter)
+        
+        video_vbox.addWidget(self.video_container)
         content_layout.addWidget(video_card)
 
         # Stats Column
@@ -269,11 +292,20 @@ class MainWindow(QMainWindow):
                 m_page.warning_img_label.setPixmap(QPixmap.fromImage(img).scaled(
                     280, 210, Qt.AspectRatioMode.KeepAspectRatio))
                 m_page.warning_card.show()
+            
+            # FM-402: Show Overlay and Play Beep
+            m_page.overlay_label.setText(f"ATTENTION!\n{result.status_message}")
+            m_page.overlay_label.show()
+            QApplication.beep()
+            
+            # Hide overlay after 2 seconds
+            QTimer.singleShot(2000, m_page.overlay_label.hide)
+            
         else:
             m_page.stat_score.setStyleSheet("color: #03DAC6;")
             m_page.stat_pose.setText("Centered")
-            # Optionally hide warning card when focused, or keep last distraction
-            # m_page.warning_card.hide() 
+            # Hide overlay if user returns to focus
+            m_page.overlay_label.hide()
 
         score = max(0, 100 - (self.distraction_count * 2))
         m_page.stat_score.setText(f"{int(score)}%")
