@@ -2,6 +2,8 @@ import os
 import cv2
 import numpy as np
 import base64
+import logging
+import secrets
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security.api_key import APIKeyHeader
 from shared.schemas import InferenceRequest, InferenceResponse
@@ -10,6 +12,13 @@ from starlette.status import HTTP_403_FORBIDDEN
 from ultralytics import YOLO
 
 load_dotenv()
+
+# Logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Focus Monitor AI Head Pose")
 
@@ -47,7 +56,7 @@ model = YOLO('yolov8n-pose.pt')
 target_id = None
 
 async def get_api_key(header_api_key: str = Depends(api_key_header)):
-    if header_api_key == API_KEY:
+    if header_api_key and secrets.compare_digest(header_api_key, API_KEY):
         return header_api_key
     raise HTTPException(
         status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
@@ -120,7 +129,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         if target_id is None or target_id not in ids:
             target_idx = np.argmin(distances)
             target_id = int(ids[target_idx])
-            print(f"[*] New Target Locked: ID {target_id}")
+            logger.info(f"[*] New Target Locked: ID {target_id}")
 
         try:
             current_idx = list(ids).index(target_id)
@@ -157,7 +166,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
 
         # Logging for debugging
         log_status = "DISTRACTED" if is_distracted else "FOCUSED"
-        print(f"[{log_status}] ID:{target_id} | Pitch:{pitch:4.1f} | Yaw:{yaw:4.1f} | Roll:{roll:4.1f} | {reason}")
+        logger.info(f"[{log_status}] ID:{target_id} | Pitch:{pitch:4.1f} | Yaw:{yaw:4.1f} | Roll:{roll:4.1f} | {reason}")
 
         return InferenceResponse(
             is_distracted=is_distracted,
@@ -170,7 +179,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         )
 
     except Exception as e:
-        print(f"[!] Inference Error: {e}")
+        logger.exception(f"[!] Inference Error: {e}")
         return InferenceResponse(
             is_distracted=False, 
             status_message=f"Server Error"

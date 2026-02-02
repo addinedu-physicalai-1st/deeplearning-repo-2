@@ -1,7 +1,11 @@
 import requests
 import json
 import os
+import logging
 from shared.schemas import InferenceRequest, InferenceResponse
+
+# Logging setup
+logger = logging.getLogger(__name__)
 
 class NetworkClient:
     def __init__(self, orchestrator_url=None, api_key=None):
@@ -9,7 +13,7 @@ class NetworkClient:
         self.api_key = api_key or os.getenv("API_KEY")
         
         if not self.api_key:
-            print("[!] WARNING: API_KEY is not set. Requests will likely fail.")
+            logger.warning("API_KEY is not set. Requests will likely fail.")
 
     def send_inference_request(self, image_base64: str) -> InferenceResponse:
         payload = InferenceRequest(image_base64=image_base64)
@@ -24,5 +28,5 @@ class NetworkClient:
             response.raise_for_status()
             return InferenceResponse(**response.json())
         except Exception as e:
-            print(f"Error sending request: {e}")
+            logger.error(f"Error sending request: {e}")
             return InferenceResponse(is_distracted=False, status_message=f"Error: {str(e)}")

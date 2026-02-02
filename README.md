@@ -80,25 +80,83 @@ deeplearning-repo-2/
 uv sync
 ```
 
-### 3. 서버 실행 (각각의 터미널에서 실행)
+### 3. 서버 실행 (단일 컴퓨터 / 여러 터미널 테스트)
 
-**1) AI Head 서버 (Port 8001)**
+한 대의 컴퓨터에서 여러 개의 터미널을 열어 테스트할 경우의 명령어입니다.
+
+**1) AI Head 서버 실행 (Port 8001)**
 ```bash
 cd apps/ai_head
 uv run python src/ai_head/main.py
 ```
 
-**2) 오케스트레이션 서버 (Port 8000)**
+**2) 오케스트레이션 서버 실행 (Port 8000)**
 ```bash
 cd apps/orchestrator
 uv run python src/orchestrator/main.py
 ```
 
-**3) 클라이언트 프로그램**
+**3) 클라이언트 프로그램 실행**
 ```bash
 cd apps/client
 uv run python src/client/main.py
 ```
+
+### 4. 분산 환경 설정 (여러 대의 컴퓨터에서 실행 시)
+
+각 서비스를 서로 다른 컴퓨터에서 실행할 경우, 네트워크 연결을 위해 다음 설정을 수행해야 합니다.
+
+#### 1) 공통 준비 사항
+*   모든 컴퓨터는 **동일한 네트워크(WiFi/유선 LAN)**에 연결되어 있어야 합니다.
+*   각 컴퓨터의 **내부 IP 주소**를 확인합니다. (Windows: `ipconfig`, Linux/Mac: `ifconfig` 또는 `ip addr`)
+*   방화벽에서 해당 포트(8000, 8001 등)를 개방해야 합니다.
+    *   **Ubuntu 24.04 (UFW) 설정 방법**:
+        1.  방화벽 상태 확인: `sudo ufw status`
+        2.  필요한 포트 허용:
+            *   `sudo ufw allow 8000/tcp` (Orchestrator용)
+            *   `sudo ufw allow 8001/tcp` (AI Head용)
+        3.  방화벽 활성화 (꺼져 있는 경우): `sudo ufw enable`
+        4.  적용된 규칙 확인: `sudo ufw status numbered`
+
+#### 2) 서비스별 `.env` 설정 예시
+
+상황에 따라 각 서비스의 `.env` 파일을 다음과 같이 수정합니다.
+
+**[시나리오 1: 모든 서비스를 서로 다른 컴퓨터에서 실행 (A, B, C)]**
+
+*   **컴퓨터 A (AI Head 서버, IP: 192.168.0.10)**: 기본 실행 (Port 8001)
+*   **컴퓨터 B (오케스트레이션 서버, IP: 192.168.0.20)**: `apps/orchestrator/.env` 수정
+    ```env
+    AI_HEAD_URL=http://192.168.0.10:8001/inference
+    API_KEY=your-secret-key
+    ```
+*   **컴퓨터 C (클라이언트 GUI)**: `apps/client/.env` 수정
+    ```env
+    ORCHESTRATOR_URL=http://192.168.0.20:8000/inference
+    API_KEY=your-secret-key
+    ```
+
+**[시나리오 2: 서버들은 한 대에, 클라이언트는 다른 한 대에 실행 (A, B)]**
+
+가장 권장되는 구성입니다. (서버 사양이 충분할 경우)
+
+*   **컴퓨터 A (서버 통합, IP: 192.168.0.10)**
+    *   **AI Head**: 기본 실행 (Port 8001)
+    *   **Orchestrator**: `apps/orchestrator/.env` 수정 (같은 컴퓨터이므로 `localhost` 사용)
+        ```env
+        AI_HEAD_URL=http://localhost:8001/inference
+        API_KEY=your-secret-key
+        ```
+*   **컴퓨터 B (클라이언트 GUI)**: `apps/client/.env` 수정
+    ```env
+    ORCHESTRATOR_URL=http://192.168.0.10:8000/inference
+    API_KEY=your-secret-key
+    ```
+
+#### 3) 실행 순서
+1.  **AI Head 서버** 실행
+2.  **오케스트레이션 서버** 실행
+3.  **클라이언트 GUI** 실행 (서버가 모두 뜬 후 실행)
 
 ---
 
