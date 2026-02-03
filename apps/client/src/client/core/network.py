@@ -8,8 +8,8 @@ from shared.schemas import InferenceRequest, InferenceResponse
 logger = logging.getLogger(__name__)
 
 class NetworkClient:
-    def __init__(self, orchestrator_url=None, api_key=None):
-        self.orchestrator_url = orchestrator_url or os.getenv("ORCHESTRATOR_URL", "http://localhost:8000/inference")
+    def __init__(self, operation_url=None, api_key=None):
+        self.operation_url = operation_url or os.getenv("OPERATION_SERVER_URL", "http://localhost:8000/inference")
         self.api_key = api_key or os.getenv("API_KEY")
         
         if not self.api_key:
@@ -20,7 +20,7 @@ class NetworkClient:
         headers = {"X-API-Key": self.api_key}
         try:
             response = requests.post(
-                self.orchestrator_url,
+                self.operation_url,
                 json=payload.dict(),
                 headers=headers,
                 timeout=5
@@ -34,7 +34,7 @@ class NetworkClient:
     def check_connection(self) -> bool:
         try:
             # Replace /inference with /health for health check
-            health_url = self.orchestrator_url.replace("/inference", "/health")
+            health_url = self.operation_url.replace("/inference", "/health")
             headers = {"X-API-Key": self.api_key}
             response = requests.get(health_url, headers=headers, timeout=2)
             return response.status_code == 200

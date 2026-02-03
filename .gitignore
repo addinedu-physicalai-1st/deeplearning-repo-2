@@ -207,6 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # Local database files
+*.db
 app/data/*.db
 
 # Virtual environments

@@ -9,6 +9,8 @@ from fastapi.security.api_key import APIKeyHeader
 from shared.schemas import InferenceRequest, InferenceResponse
 from dotenv import load_dotenv
 from starlette.status import HTTP_403_FORBIDDEN
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 
 load_dotenv()
@@ -22,6 +24,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Focus Monitor AI Head Pose")
 
+# CORS Setup
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Security
 API_KEY = os.getenv("API_KEY")
 if not API_KEY:
@@ -32,7 +43,6 @@ API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 # Middleware: Limit Request Size (10MB) to prevent DoS
-from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request
 
 class LimitUploadSize(BaseHTTPMiddleware):
@@ -92,6 +102,10 @@ def estimate_pose(keypoints_normalized):
 
     return pitch, yaw, roll
 
+@app.get("/health")
+async def health_check(api_key: str = Depends(get_api_key)):
+    return {"status": "ok", "service": "ai_head"}
+
 @app.post("/inference", response_model=InferenceResponse)
 async def inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
     global target_id
@@ -110,7 +124,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         # JPEG: FF D8 FF
         # PNG: 89 50 4E 47
         if len(img_data) < 4:
-            return InferenceResponse(is_distracted=False, status_message="Invalid image data (too short)")
+            raise HTTPException(status_code=400, detail="Invalid image data (too short)")
         
         is_valid_image = (
             img_data.startswith(b'\xff\xd8\xff') or  # JPEG
@@ -120,12 +134,12 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         
         if not is_valid_image:
             logger.warning(f"Potential malicious upload: invalid image signature")
-            return InferenceResponse(is_distracted=False, status_message="Unsupported image format")
+            raise HTTPException(status_code=400, detail="Unsupported image format")
 
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if frame is None:
-            return InferenceResponse(is_distracted=False, status_message="Could not decode image")
+            raise HTTPException(status_code=400, detail="Could not decode image")
 
         # YOLO Tracking
         results = model.track(frame, persist=True, verbose=False)

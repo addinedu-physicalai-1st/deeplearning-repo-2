@@ -1,7 +1,7 @@
 [project]
-name = "monitor-orchestrator"
+name = "monitor-ai-interface"
 version = "0.1.0"
-description = "Orchestrator server"
+description = "AI Interface server for model orchestration"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,7 +13,11 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/orchestrator"]
+packages = ["src/ai_interface"]
 
 [tool.uv.sources]
 monitor-shared = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
