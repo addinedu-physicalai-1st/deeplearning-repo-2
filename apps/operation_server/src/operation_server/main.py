@@ -15,12 +15,13 @@ import json
 from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Security, Depends, Response, Request
 from fastapi.security.api_key import APIKeyHeader
-from shared.schemas import InferenceRequest, InferenceResponse
+from shared.schemas import InferenceRequest, InferenceResponse, SessionStartResponse, SessionSummary
 from dotenv import load_dotenv
 from starlette.status import HTTP_403_FORBIDDEN
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 # Change to absolute imports within the package
 from operation_server.database import engine, get_db
@@ -40,10 +41,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Focus Monitor Operation Server")
 
-# CORS Setup
+# CORS Setup - More restrictive in production
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -117,6 +119,46 @@ AI_INTERFACE_URL = os.getenv("AI_INTERFACE_URL", "http://localhost:8010/inferenc
 async def health_check(api_key: str = Depends(get_api_key)):
     return {"status": "ok", "service": "operation_server"}
 
+@app.post("/sessions/start", response_model=SessionStartResponse)
+async def start_session(api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
+    new_session = models.MonitoringSession()
+    db.add(new_session)
+    db.commit()
+    db.refresh(new_session)
+    return SessionStartResponse(session_id=new_session.id, start_time=new_session.start_time)
+
+@app.post("/sessions/stop/{session_id}", response_model=SessionSummary)
+async def stop_session(session_id: str, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
+    session = db.query(models.MonitoringSession).filter(models.MonitoringSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session.end_time = datetime.utcnow()
+    
+    # Calculate stats from logs
+    logs = db.query(models.FocusLog).filter(models.FocusLog.session_id == session_id).all()
+    total_logs = len(logs)
+    if total_logs > 0:
+        distracted_logs = len([log for log in logs if log.is_distracted])
+        focused_logs = total_logs - distracted_logs
+        session.focus_ratio = (focused_logs / total_logs) * 100
+        session.distraction_count = distracted_logs
+    
+    # LLM Feedback to be handled by FM-502 worker
+    session.llm_comment = None
+    
+    db.commit()
+    db.refresh(session)
+    
+    return SessionSummary(
+        session_id=session.id,
+        start_time=session.start_time,
+        end_time=session.end_time,
+        focus_ratio=session.focus_ratio,
+        distraction_count=session.distraction_count,
+        llm_comment=session.llm_comment
+    )
+
 @app.post("/inference", response_model=InferenceResponse)
 async def inference(request: InferenceRequest, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     # 0. Basic Image Validation
@@ -150,6 +192,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             
             # 2. Save result to SQLite DB
             new_log = models.FocusLog(
+                session_id=request.session_id,
                 is_distracted=ai_result.get('is_distracted'),
                 status_message=ai_result.get('status_message'),
                 head_pose_data=ai_result.get('head_pose'),

@@ -1,6 +1,7 @@
 import sys
 import cv2
 import time
+import logging
 import numpy as np
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication)
@@ -10,6 +11,9 @@ import pyqtgraph as pg
 
 from client.core.camera import Camera
 from client.core.network import NetworkClient
+
+# Logging setup
+logger = logging.getLogger(__name__)
 
 # --- 공통 스타일 정의 ---
 STYLE_SHEET = """
@@ -37,12 +41,13 @@ STYLE_SHEET = """
 
 class InferenceThread(QThread):
     result_ready = pyqtSignal(object)
-    def __init__(self, network_client, image_base64):
+    def __init__(self, network_client, image_base64, session_id=None):
         super().__init__()
         self.network_client = network_client
         self.image_base64 = image_base64
+        self.session_id = session_id
     def run(self):
-        result = self.network_client.send_inference_request(self.image_base64)
+        result = self.network_client.send_inference_request(self.image_base64, self.session_id)
         self.result_ready.emit(result)
 
 class MainPage(QWidget):
@@ -216,6 +221,77 @@ class MonitoringPage(QWidget):
         layout.addLayout(vbox, r, c)
         setattr(self, f"stat_{key}", val)
 
+class ReportPage(QWidget):
+    """모니터링 종료 후 리포트 화면 (FM-501)"""
+    home_requested = pyqtSignal()
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QFrame()
+        card.setObjectName("Card")
+        card.setFixedSize(600, 550)
+        card_layout = QVBoxLayout(card)
+        card_layout.setSpacing(20)
+
+        title = QLabel("SESSION REPORT")
+        title.setObjectName("Title")
+        card_layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Stats Grid
+        stats_grid = QGridLayout()
+        self.add_report_stat(stats_grid, "FOCUS RATIO", "0%", 0, 0, "ratio")
+        self.add_report_stat(stats_grid, "DISTRACTIONS", "0", 0, 1, "dist")
+        self.add_report_stat(stats_grid, "DURATION", "00:00", 1, 0, "duration")
+        card_layout.addLayout(stats_grid)
+
+        # LLM Feedback
+        feedback_label = QLabel("AI FEEDBACK")
+        feedback_label.setObjectName("StatLabel")
+        card_layout.addWidget(feedback_label)
+        
+        self.feedback_text = QLabel("Calculating your focus pattern...")
+        self.feedback_text.setWordWrap(True)
+        self.feedback_text.setStyleSheet("font-size: 16px; color: #E0E0E0; background: #2D2D2D; padding: 15px; border-radius: 8px;")
+        card_layout.addWidget(self.feedback_text)
+
+        home_btn = QPushButton("BACK TO HOME")
+        home_btn.setObjectName("PrimaryBtn")
+        home_btn.clicked.connect(self.home_requested.emit)
+        card_layout.addWidget(home_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(card)
+
+    def add_report_stat(self, layout, label, value, r, c, key):
+        vbox = QVBoxLayout()
+        lbl = QLabel(label); lbl.setObjectName("StatLabel")
+        val = QLabel(value); val.setObjectName("StatValue")
+        vbox.addWidget(lbl); vbox.addWidget(val)
+        layout.addLayout(vbox, r, c)
+        setattr(self, f"report_{key}", val)
+
+    def set_report_data(self, data):
+        self.report_ratio.setText(f"{int(data.get('focus_ratio', 0))}%")
+        self.report_dist.setText(str(data.get('distraction_count', 0)))
+        
+        # Duration calculation
+        try:
+            from datetime import datetime
+            start = datetime.fromisoformat(data['start_time'].replace('Z', ''))
+            end = datetime.fromisoformat(data['end_time'].replace('Z', ''))
+            duration = end - start
+            minutes = int(duration.total_seconds() // 60)
+            seconds = int(duration.total_seconds() % 60)
+            self.report_duration.setText(f"{minutes:02d}:{seconds:02d}")
+        except:
+            self.report_duration.setText("00:00")
+            
+        self.feedback_text.setText(data.get('llm_comment') or "No feedback available.")
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -233,13 +309,16 @@ class MainWindow(QMainWindow):
 
         self.main_page = MainPage()
         self.monitoring_page = MonitoringPage()
+        self.report_page = ReportPage()
 
         self.stack.addWidget(self.main_page)
         self.stack.addWidget(self.monitoring_page)
+        self.stack.addWidget(self.report_page)
 
         # Signals
         self.main_page.start_requested.connect(self.start_session)
         self.monitoring_page.stop_requested.connect(self.stop_session)
+        self.report_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
 
         # Timers
         self.preview_timer = QTimer()
@@ -257,8 +336,15 @@ class MainWindow(QMainWindow):
         self.start_time = 0
         self.history_scores = []
         self.distraction_count = 0
+        self.current_session_id = None
 
     def start_session(self):
+        # Start session in DB
+        session_data = self.network_client.start_session()
+        if session_data:
+            self.current_session_id = session_data.get("session_id")
+            logger.info(f"Session started: {self.current_session_id}")
+        
         self.is_monitoring = True
         self.start_time = time.time()
         self.distraction_count = 0
@@ -269,6 +355,16 @@ class MainWindow(QMainWindow):
     def stop_session(self):
         self.is_monitoring = False
         self.inference_timer.stop()
+        
+        # Stop session and get summary
+        if self.current_session_id:
+            summary = self.network_client.stop_session(self.current_session_id)
+            if summary:
+                self.report_page.set_report_data(summary)
+                self.stack.setCurrentWidget(self.report_page)
+                self.current_session_id = None
+                return
+
         self.stack.setCurrentWidget(self.main_page)
 
     def check_server_connection(self):
@@ -297,7 +393,7 @@ class MainWindow(QMainWindow):
         if self.is_monitoring and hasattr(self, 'current_frame'):
             self.sent_frame = self.current_frame.copy() # Capture current frame for warning display
             image_base64 = self.camera.frame_to_base64(self.sent_frame)
-            self.thread = InferenceThread(self.network_client, image_base64)
+            self.thread = InferenceThread(self.network_client, image_base64, self.current_session_id)
             self.thread.result_ready.connect(self.handle_result)
             self.thread.start()
 

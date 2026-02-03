@@ -15,8 +15,8 @@ class NetworkClient:
         if not self.api_key:
             logger.warning("API_KEY is not set. Requests will likely fail.")
 
-    def send_inference_request(self, image_base64: str) -> InferenceResponse:
-        payload = InferenceRequest(image_base64=image_base64)
+    def send_inference_request(self, image_base64: str, session_id: str = None) -> InferenceResponse:
+        payload = InferenceRequest(image_base64=image_base64, session_id=session_id)
         headers = {"X-API-Key": self.api_key}
         try:
             response = requests.post(
@@ -30,6 +30,28 @@ class NetworkClient:
         except Exception as e:
             logger.error(f"Error sending request: {e}")
             return InferenceResponse(is_distracted=False, status_message="Connection Error")
+
+    def start_session(self) -> dict:
+        url = self.operation_url.replace("/inference", "/sessions/start")
+        headers = {"X-API-Key": self.api_key}
+        try:
+            response = requests.post(url, headers=headers, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error starting session: {e}")
+            return None
+
+    def stop_session(self, session_id: str) -> dict:
+        url = self.operation_url.replace("/inference", f"/sessions/stop/{session_id}")
+        headers = {"X-API-Key": self.api_key}
+        try:
+            response = requests.post(url, headers=headers, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error stopping session: {e}")
+            return None
 
     def check_connection(self) -> bool:
         try:
