@@ -155,35 +155,40 @@ async def stop_session(session_id: str, api_key: str = Depends(get_api_key), db:
             duration = session.end_time - session.start_time
             duration_seconds = int(duration.total_seconds())
         
-        # 새로운 API 형식에 맞는 세션 데이터 생성
-        session_data = {
-            'duration': duration_seconds,
-            'focus_score': session.focus_ratio,  # 집중 비율을 점수로 사용
-            'distract_cnt': session.distraction_count,
-            'model_type': 'HEAD'  # 기본 모델 타입
-        }
-        
-        feedback_request = FeedbackRequest(session_data=session_data)
-        
-        async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
-            headers = {API_KEY_NAME: API_KEY}
-            response = await client.post(
-                LLM_SERVER_URL,
-                json=feedback_request.dict(),
-                headers=headers
-            )
-            response.raise_for_status()
-            llm_result = response.json()
-            # comment와 feedback을 결합하여 저장
-            comment = llm_result.get("comment", "")
-            feedback = llm_result.get("feedback", "")
-            if comment and feedback:
-                session.llm_comment = f"{comment}\n\n{feedback}"
-            elif comment:
-                session.llm_comment = comment
-            elif feedback:
-                session.llm_comment = feedback
-            logger.info(f"세션 {session_id}에 대한 LLM 피드백 생성 완료")
+        # 5분 미만이면 LLM 호출 없이 메시지 설정
+        if duration_seconds < 300:  # 5분 = 300초
+            session.llm_comment = "모니터링 시간이 너무 짧아 코멘트를 생성하지 못하였습니다."
+            logger.info(f"세션 {session_id}가 너무 짧아 LLM 피드백 생성을 건너뜀 (duration: {duration_seconds}초)")
+        else:
+            # 새로운 API 형식에 맞는 세션 데이터 생성
+            session_data = {
+                'duration': duration_seconds,
+                'focus_score': session.focus_ratio,  # 집중 비율을 점수로 사용
+                'distract_cnt': session.distraction_count,
+                'model_type': 'HEAD'  # 기본 모델 타입
+            }
+            
+            feedback_request = FeedbackRequest(session_data=session_data)
+            
+            async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
+                headers = {API_KEY_NAME: API_KEY}
+                response = await client.post(
+                    LLM_SERVER_URL,
+                    json=feedback_request.dict(),
+                    headers=headers
+                )
+                response.raise_for_status()
+                llm_result = response.json()
+                # comment와 feedback을 결합하여 저장
+                comment = llm_result.get("comment", "")
+                feedback = llm_result.get("feedback", "")
+                if comment and feedback:
+                    session.llm_comment = f"{comment}\n\n{feedback}"
+                elif comment:
+                    session.llm_comment = comment
+                elif feedback:
+                    session.llm_comment = feedback
+                logger.info(f"세션 {session_id}에 대한 LLM 피드백 생성 완료")
     except httpx.HTTPStatusError as e:
         logger.warning(f"LLM 서버 오류: {e.response.status_code}, 코멘트 없이 계속 진행")
     except Exception as e:
