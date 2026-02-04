@@ -23,7 +23,8 @@ class NetworkClient:
                 self.operation_url,
                 json=payload.dict(),
                 headers=headers,
-                timeout=5
+                timeout=5,
+                verify=True
             )
             response.raise_for_status()
             return InferenceResponse(**response.json())
@@ -35,7 +36,7 @@ class NetworkClient:
         url = self.operation_url.replace("/inference", "/sessions/start")
         headers = {"X-API-Key": self.api_key}
         try:
-            response = requests.post(url, headers=headers, timeout=5)
+            response = requests.post(url, headers=headers, timeout=5, verify=True)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -46,7 +47,7 @@ class NetworkClient:
         url = self.operation_url.replace("/inference", f"/sessions/stop/{session_id}")
         headers = {"X-API-Key": self.api_key}
         try:
-            response = requests.post(url, headers=headers, timeout=5)
+            response = requests.post(url, headers=headers, timeout=5, verify=True)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -58,7 +59,7 @@ class NetworkClient:
             # Replace /inference with /health for health check
             health_url = self.operation_url.replace("/inference", "/health")
             headers = {"X-API-Key": self.api_key}
-            response = requests.get(health_url, headers=headers, timeout=2)
+            response = requests.get(health_url, headers=headers, timeout=2, verify=True)
             return response.status_code == 200
         except:
             return False

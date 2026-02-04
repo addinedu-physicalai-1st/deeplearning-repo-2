@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Focus Monitor AI Head Pose")
 
 # CORS Setup - More restrictive in production
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else []
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,

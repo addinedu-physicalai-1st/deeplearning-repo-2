@@ -42,7 +42,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Focus Monitor Operation Server")
 
 # CORS Setup - More restrictive in production
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Default to empty list to require explicit configuration in production
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else []
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -164,7 +165,7 @@ async def stop_session(session_id: str, api_key: str = Depends(get_api_key), db:
         
         feedback_request = FeedbackRequest(session_data=session_data)
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
             headers = {API_KEY_NAME: API_KEY}
             response = await client.post(
                 LLM_SERVER_URL,
@@ -217,8 +218,9 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         except Exception as e:
             if isinstance(e, HTTPException): raise e
             raise HTTPException(status_code=400, detail="Invalid base64 encoding")
-
-    async with httpx.AsyncClient() as client:
+    
+    # Use verify=True for production environments
+    async with httpx.AsyncClient(verify=True) as client:
         try:
             # 1. Forward request to AI Interface Server
             headers = {API_KEY_NAME: API_KEY}

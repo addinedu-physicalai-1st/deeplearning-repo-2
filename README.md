@@ -4,6 +4,32 @@
 
 ---
 
+## 🚀 시작하기 (Quick Start)
+
+프로젝트를 클론한 후, 다음 단계에 따라 즉시 실행할 수 있습니다.
+
+### 1. 선수 요구 사항
+- **Python 3.10+**
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/) 패키지 매니저** (설치 권장)
+
+### 2. 프로젝트 설정 및 실행
+
+```bash
+# 1. 의존성 설치 (루트 폴더에서 한 번만 실행)
+uv sync
+
+# 2. 필수 모델 파일 배치
+# - apps/ai_emotion/best.pt 파일을 해당 폴더에 넣어주세요.
+# - (나머지 모델은 실행 시 자동 다운로드됩니다.)
+
+# 3. 통합 실행 스크립트 가동
+./run_dev.sh  # (Windows의 경우 run_dev.bat)
+```
+
+이후 `dev.py` 스크립트가 자동으로 각 서버의 `.env` 파일을 생성하고 보안 키를 검사하며 서버를 구동합니다.
+
+---
+
 ## 🏗 시스템 아키텍처
 
 비즈니스 운영 레이어와 AI 기술 레이어의 분리를 통해 시스템의 독립성과 확장성을 극대화했습니다.
@@ -49,6 +75,22 @@ graph TD
 
 ## 📂 프로젝트 구조 (uv Workspace)
 
+본 프로젝트는 **uv Workspace**를 사용하여 여러 마이크로서비스를 효율적으로 관리합니다.
+
+### 🔹 의존성 관리 및 패키지 추가
+각 서비스는 독립적인 `pyproject.toml`을 가지며, 특정 서비스에 패키지를 추가하려면 해당 폴더로 이동하여 명령어를 실행합니다.
+
+```bash
+# 특정 앱에 패키지 추가 예시
+cd apps/ai_head
+uv add <package_name>
+```
+
+*   **자동 동기화**: `run_dev.sh`는 내부적으로 `uv run`을 사용합니다. 패키지 변경 후 별도의 설치 과정 없이 스크립트를 재실행하는 것만으로도 **자동으로 의존성이 동기화**됩니다.
+*   **공유 환경**: 모든 서비스는 루트의 `.venv` 가상환경을 공유하여 효율적으로 관리됩니다.
+*   **파이썬 버전 관리**: 각 서비스는 `pyproject.toml`의 `requires-python`을 통해 필요한 파이썬 버전을 개별적으로 명시할 수 있습니다. `uv`는 워크스페이스 내 모든 서비스의 요구사항을 만족하는 최적의 파이썬 버전을 자동으로 선택하여 관리합니다.
+
+### 🔹 디렉토리 구조
 ```text
 deeplearning-repo-2/
 ├── apps/
@@ -56,9 +98,13 @@ deeplearning-repo-2/
 │   ├── operation_server/ # [Core] 비즈니스 로직 및 SQLite DB 통합 (Port 8000)
 │   ├── ai_interface/     # [AI Core] 여러 AI 모델 결과를 집계하는 서버 (Port 8010)
 │   ├── ai_head/          # [Vision] YOLOv8 기반 Head Pose 분석 서버 (Port 8001)
-│   └── ...               # 기타 AI 서버 및 LLM 서버 (추후 연동)
+│   ├── ai_emotion/       # [Vision] 감정 분석 서버 (Port 8002)
+│   └── llm_server/       # [AI] Ollama 기반 피드백 생성 서버 (Port 8004)
 ├── packages/
 │   └── shared/           # [Common] 프로젝트 공통 데이터 규격 (Pydantic)
+├── scripts/              # [Dev] 개발용 유틸리티 스크립트
+├── run_dev.sh            # 통합 서버 실행 스크립트 (Windows: run_dev.bat)
+├── stop_dev.sh           # 서버 일괄 종료 스크립트 (Windows: stop_dev.bat)
 ├── pyproject.toml        # 프로젝트 전체 워크스페이스 설정
 └── README.md             # 프로젝트 가이드
 ```
@@ -70,39 +116,61 @@ deeplearning-repo-2/
 모든 서버는 루트 디렉토리에서 `uv sync`를 완료한 후 실행해야 합니다.  
 슬랙에서 `best.pt`를 `deeplearning-repo-2/apps/ai_emotion/best.pt` 위치에 다운받은 후 실행해야 합니다.
 
-### 1. 서비스 실행 (각 터미널에서 순서대로 실행)
+### 1. 통합 실행 (권장)
+
+개발 편의를 위해 백엔드 서버와 클라이언트 프로그램을 한 번에 실행하고 관리할 수 있는 스크립트를 제공합니다. 이 스크립트는 **포트 충돌 확인, .env 파일 자동 생성, 통합 로그 출력** 기능을 지원하며 Windows, macOS, Linux를 모두 지원합니다.
+
+#### 🍎 macOS / 🐧 Linux
+```bash
+# 모든 서버 및 클라이언트 일괄 실행
+./run_dev.sh
+
+# 종료 (실행 중인 터미널에서 Ctrl+C 또는 별도 터미널에서 실행)
+./stop_dev.sh
+```
+
+#### 🪟 Windows
+```cmd
+# 모든 서버 및 클라이언트 일괄 실행
+run_dev.bat
+
+# 종료 (실행 중인 터미널에서 Ctrl+C 또는 별도 터미널에서 실행)
+stop_dev.bat
+```
+
+### 2. 개별 서비스 실행 (수동)
+
+특정 서버만 별도로 실행하거나 디버깅이 필요한 경우 각 디렉토리에서 수동으로 실행할 수 있습니다.
 
 **1) AI Head 서버** (Port 8001)
 ```bash
-cd apps/ai_head
-uv run python src/ai_head/main.py
+cd apps/ai_head && uv run python src/ai_head/main.py
 ```
 
 **2) AI Emotion 서버** (Port 8002)
 ```bash
-cd apps/ai_emotion
-uv run python src/ai_emotion/main.py
+cd apps/ai_emotion && uv run python src/ai_emotion/main.py
 ```
 
 **3) AI Interface 서버** (Port 8010)
 ```bash
-cd apps/ai_interface
-uv run python src/ai_interface/main.py
+cd apps/ai_interface && uv run python src/ai_interface/main.py
 ```
 
 **4) Operation 서버** (Port 8000)
 ```bash
-cd apps/operation_server
-uv run python src/operation_server/main.py
+cd apps/operation_server && uv run python src/operation_server/main.py
 ```
 
-**5) LLM 서버** (Port 8004, 세션 종료 시 피드백 생성용)
+**5) LLM 서버** (Port 8004)
 ```bash
-cd apps/llm_server
-uv run python src/llm_server/main.py
+cd apps/llm_server && uv run python src/llm_server/main.py
 ```
 
-**6) 클라이언트 프로그램**
+### 3. 클라이언트 프로그램 실행 (수동 실행 시)
+
+백엔드 서버를 수동으로 각각 실행한 경우, 별도의 터미널에서 클라이언트를 실행합니다. (`./run_dev.sh`를 사용했다면 이 단계는 건너뜁니다.)
+
 ```bash
 cd apps/client
 uv run python src/client/main.py

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Focus Monitor AI Interface")
 
 # CORS Setup - More restrictive in production
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else []
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -75,8 +75,8 @@ async def call_ai_server(client: httpx.AsyncClient, url: str, request: Inference
         logger.error(f"Server {url} returned {response.status_code}")
         return {"error": "Sub-server error", "status_code": response.status_code}
     except Exception as e:
-        logger.exception(f"Exception calling {url}")
-        return {"error": str(e)}
+        logger.error(f"Error calling {url}: {str(e)}") # Log the actual error
+        return {"error": "Connection error to sub-server"} # Return a generic message
 
 @app.get("/health")
 async def health_check(api_key: str = Depends(get_api_key)):
@@ -84,7 +84,7 @@ async def health_check(api_key: str = Depends(get_api_key)):
 
 @app.post("/inference", response_model=InferenceResponse)
 async def inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=True) as client:
         try:
             # Orchestrate multiple AI models
             tasks = [

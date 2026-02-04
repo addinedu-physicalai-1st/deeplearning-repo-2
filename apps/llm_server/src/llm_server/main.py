@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Focus Monitor LLM Server")
 
 # CORS Setup - More restrictive in production
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else []
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -141,14 +141,14 @@ async def generate_feedback(
             # 오류 시 폴백 JSON 반환
             return FeedbackResponse(
                 comment="분석 중 오류가 발생했습니다.",
-                feedback=f"Ollama 연결 상태를 확인해주세요. ({str(e)})"
+                feedback="Ollama 서비스 연결에 실패했습니다. 관리자에게 문의해주세요."
             )
             
     except Exception as e:
         logger.exception(f"피드백 요청 처리 중 오류: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"내부 서버 오류: {str(e)}"
+            detail="내부 서버 오류가 발생했습니다."
         )
 
 if __name__ == "__main__":
