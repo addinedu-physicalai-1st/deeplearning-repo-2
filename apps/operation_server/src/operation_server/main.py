@@ -15,7 +15,7 @@ import json
 from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Security, Depends, Response, Request
 from fastapi.security.api_key import APIKeyHeader
-from shared.schemas import InferenceRequest, InferenceResponse, SessionStartResponse, SessionSummary
+from shared.schemas import InferenceRequest, InferenceResponse, SessionStartResponse, SessionSummary, FeedbackRequest
 from dotenv import load_dotenv
 from starlette.status import HTTP_403_FORBIDDEN
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -53,7 +53,7 @@ app.add_middleware(
 
 API_KEY = os.getenv("API_KEY")
 if not API_KEY:
-    raise RuntimeError("ENVIRONMENT ERROR: API_KEY is not set in .env file.")
+    raise RuntimeError("환경 변수 오류: .env 파일에 API_KEY가 설정되지 않았습니다.")
 
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
@@ -114,6 +114,7 @@ async def get_api_key(header_api_key: str = Depends(api_key_header)):
 
 # Service URLs
 AI_INTERFACE_URL = os.getenv("AI_INTERFACE_URL", "http://localhost:8010/inference")
+LLM_SERVER_URL = os.getenv("LLM_SERVER_URL", "http://localhost:8004/feedback")
 
 @app.get("/health")
 async def health_check(api_key: str = Depends(get_api_key)):
@@ -144,8 +145,48 @@ async def stop_session(session_id: str, api_key: str = Depends(get_api_key), db:
         session.focus_ratio = (focused_logs / total_logs) * 100
         session.distraction_count = distracted_logs
     
-    # LLM Feedback to be handled by FM-502 worker
+    # LLM 피드백 코멘트 생성
     session.llm_comment = None
+    try:
+        # 세션 지속 시간 계산 (초 단위)
+        duration_seconds = 0
+        if session.end_time and session.start_time:
+            duration = session.end_time - session.start_time
+            duration_seconds = int(duration.total_seconds())
+        
+        # 새로운 API 형식에 맞는 세션 데이터 생성
+        session_data = {
+            'duration': duration_seconds,
+            'focus_score': session.focus_ratio,  # 집중 비율을 점수로 사용
+            'distract_cnt': session.distraction_count,
+            'model_type': 'HEAD'  # 기본 모델 타입
+        }
+        
+        feedback_request = FeedbackRequest(session_data=session_data)
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = {API_KEY_NAME: API_KEY}
+            response = await client.post(
+                LLM_SERVER_URL,
+                json=feedback_request.dict(),
+                headers=headers
+            )
+            response.raise_for_status()
+            llm_result = response.json()
+            # comment와 feedback을 결합하여 저장
+            comment = llm_result.get("comment", "")
+            feedback = llm_result.get("feedback", "")
+            if comment and feedback:
+                session.llm_comment = f"{comment}\n\n{feedback}"
+            elif comment:
+                session.llm_comment = comment
+            elif feedback:
+                session.llm_comment = feedback
+            logger.info(f"세션 {session_id}에 대한 LLM 피드백 생성 완료")
+    except httpx.HTTPStatusError as e:
+        logger.warning(f"LLM 서버 오류: {e.response.status_code}, 코멘트 없이 계속 진행")
+    except Exception as e:
+        logger.warning(f"LLM 피드백 생성 실패: {e}, 코멘트 없이 계속 진행")
     
     db.commit()
     db.refresh(session)

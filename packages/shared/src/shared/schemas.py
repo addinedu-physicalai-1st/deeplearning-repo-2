@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Union
+import json
+from pydantic import BaseModel, Field, model_validator
+from typing import Optional, List, Union, Any
 from datetime import datetime
 from uuid import UUID
 
@@ -25,3 +26,28 @@ class SessionSummary(BaseModel):
     focus_ratio: float
     distraction_count: int
     llm_comment: Optional[str] = None
+
+class FeedbackRequest(BaseModel):
+    session_data: dict
+
+class FeedbackResponse(BaseModel):
+    comment: str = Field(description="사용자 감정을 고려한 격려나 위로의 말")
+    feedback: str = Field(description="데이터에 기반한 구체적이고 실천 가능한 행동 교정 팁")
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _validate_raw_llm_output(cls, value: Any, handler):
+        if isinstance(value, str):
+            content = value.strip()
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            try:
+                value = json.loads(content)
+            except json.JSONDecodeError:
+                return cls(
+                    comment="분석 결과를 생성하는 중 오류가 발생했습니다.",
+                    feedback="세션 데이터를 다시 확인해주세요.",
+                )
+        return handler(value)

@@ -13,9 +13,11 @@ resolution-markers = [
 [manifest]
 members = [
     "focus-monitor-workspace",
+    "monitor-ai-emotion",
     "monitor-ai-head",
     "monitor-ai-interface",
     "monitor-client",
+    "monitor-llm-server",
     "monitor-operation-server",
     "monitor-shared",
 ]
@@ -852,6 +854,29 @@ wheels = [
 ]
 
 [[package]]
+name = "monitor-ai-emotion"
+version = "0.1.0"
+source = { virtual = "apps/ai_emotion" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "monitor-shared" },
+    { name = "opencv-python" },
+    { name = "python-dotenv" },
+    { name = "ultralytics" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.95.0" },
+    { name = "monitor-shared", editable = "packages/shared" },
+    { name = "opencv-python", specifier = ">=4.8.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "ultralytics", specifier = ">=8.4.9" },
+    { name = "uvicorn", specifier = ">=0.22.0" },
+]
+
+[[package]]
 name = "monitor-ai-head"
 version = "0.1.0"
 source = { virtual = "apps/ai_head" }
@@ -914,6 +939,29 @@ requires-dist = [
     { name = "pyqtgraph", specifier = ">=0.14.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.28.0" },
+]
+
+[[package]]
+name = "monitor-llm-server"
+version = "0.1.0"
+source = { editable = "apps/llm_server" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "monitor-shared" },
+    { name = "ollama" },
+    { name = "python-dotenv" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.95.0" },
+    { name = "httpx", specifier = ">=0.24.0" },
+    { name = "monitor-shared", editable = "packages/shared" },
+    { name = "ollama", specifier = ">=0.1.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "uvicorn", specifier = ">=0.22.0" },
 ]
 
 [[package]]
@@ -1270,6 +1318,19 @@ version = "12.8.90"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/eb/86626c1bbc2edb86323022371c39aa48df6fd8b0a1647bc274577f72e90b/nvidia_nvtx_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:5b17e2001cc0d751a5bc2c6ec6d26ad95913324a4adb86788c944f8ce9ba441f", size = 89954, upload-time = "2025-03-07T01:42:44.131Z" },
+]
+
+[[package]]
+name = "ollama"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/5a/652dac4b7affc2b37b95386f8ae78f22808af09d720689e3d7a86b6ed98e/ollama-0.6.1.tar.gz", hash = "sha256:478c67546836430034b415ed64fa890fd3d1ff91781a9d548b3325274e69d7c6", size = 51620, upload-time = "2025-11-13T23:02:17.416Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/47/4f/4a617ee93d8208d2bcf26b2d8b9402ceaed03e3853c754940e2290fed063/ollama-0.6.1-py3-none-any.whl", hash = "sha256:fc4c984b345735c5486faeee67d8a265214a31cbb828167782dc642ce0a2bf8c", size = 14354, upload-time = "2025-11-13T23:02:16.292Z" },
 ]
 
 [[package]]
