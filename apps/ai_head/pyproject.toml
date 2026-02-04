@@ -10,6 +10,7 @@ dependencies = [
     "monitor-shared",
     "python-dotenv>=1.0.0",
     "ultralytics>=8.4.9",
+    "torch==2.1.2",
 ]
 
 [tool.hatch.build.targets.wheel]
