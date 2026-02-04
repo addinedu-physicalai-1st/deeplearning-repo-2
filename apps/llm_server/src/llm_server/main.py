@@ -103,7 +103,7 @@ async def generate_feedback(
     api_key: str = Depends(get_api_key)
 ):
     """
-    Ollama를 사용하여 세션 데이터를 기반으로 피드백을 생성합니다.
+    Ollama를 사용하여 세션 데이터를 기반으로 피드백을 한국어만 사용해 생성합니다.
     """
     try:
         session_data = request.session_data

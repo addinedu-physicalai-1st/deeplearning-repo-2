@@ -155,8 +155,8 @@ async def stop_session(session_id: str, api_key: str = Depends(get_api_key), db:
             duration = session.end_time - session.start_time
             duration_seconds = int(duration.total_seconds())
         
-        # 5분 미만이면 LLM 호출 없이 메시지 설정
-        if duration_seconds < 300:  # 5분 = 300초
+        # 1분 미만이면 LLM 호출 없이 메시지 설정
+        if duration_seconds < 60:  # 1분 = 60초
             session.llm_comment = "모니터링 시간이 너무 짧아 코멘트를 생성하지 못하였습니다."
             logger.info(f"세션 {session_id}가 너무 짧아 LLM 피드백 생성을 건너뜀 (duration: {duration_seconds}초)")
         else:
