@@ -67,7 +67,7 @@ deeplearning-repo-2/
 
 ## 📋 실행 및 테스트 방법
 
-모든 서버는 루트 디렉토리에서 `uv sync`를 완료한 후 실행해야 합니다.
+모든 서버는 루트 디렉토리에서 `uv sync`를 완료한 후 실행해야 합니다.  
 슬랙에서 `best.pt`를 `deeplearning-repo-2/apps/ai_emotion/best.pt` 위치에 다운받은 후 실행해야 합니다.
 
 ### 1. 서비스 실행 (각 터미널에서 순서대로 실행)
