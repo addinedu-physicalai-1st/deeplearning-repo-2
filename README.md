@@ -68,6 +68,7 @@ deeplearning-repo-2/
 ## 📋 실행 및 테스트 방법
 
 모든 서버는 루트 디렉토리에서 `uv sync`를 완료한 후 실행해야 합니다.
+슬랙에서 `best.pt`를 `deeplearning-repo-2/apps/ai_emotion/best.pt` 위치에 다운받은 후 실행해야 합니다.
 
 ### 1. 서비스 실행 (각 터미널에서 순서대로 실행)
 
@@ -77,19 +78,31 @@ cd apps/ai_head
 uv run python src/ai_head/main.py
 ```
 
-**2) AI Interface 서버** (Port 8010)
+**2) AI Emotion 서버** (Port 8002)
+```bash
+cd apps/ai_emotion
+uv run python src/ai_emotion/main.py
+```
+
+**3) AI Interface 서버** (Port 8010)
 ```bash
 cd apps/ai_interface
 uv run python src/ai_interface/main.py
 ```
 
-**3) Operation 서버** (Port 8000)
+**4) Operation 서버** (Port 8000)
 ```bash
 cd apps/operation_server
 uv run python src/operation_server/main.py
 ```
 
-**4) 클라이언트 프로그램**
+**5) LLM 서버** (Port 8004, 세션 종료 시 피드백 생성용)
+```bash
+cd apps/llm_server
+uv run python src/llm_server/main.py
+```
+
+**6) 클라이언트 프로그램**
 ```bash
 cd apps/client
 uv run python src/client/main.py
