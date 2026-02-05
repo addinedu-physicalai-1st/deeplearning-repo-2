@@ -143,6 +143,8 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
 
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
         if frame is None:
             raise HTTPException(status_code=400, detail="이미지를 디코딩할 수 없습니다")
 
