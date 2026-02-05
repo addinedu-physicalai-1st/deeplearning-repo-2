@@ -128,6 +128,9 @@ jobs:
             source "$VENV_PATH/bin/activate"
             # jaxlib 다시 제거
             pip uninstall -y jax jaxlib 2>/dev/null || true
+            # workspace 패키지 설치 (shared 모듈을 위해)
+            echo "Installing workspace package (shared)..."
+            uv pip install -e packages/shared || pip install -e packages/shared || true
             # 필수 패키지 확인
             python -c "import fastapi, uvicorn, cv2, mediapipe, numpy" 2>/dev/null || {
               echo "⚠️  Some packages missing, installing..."
