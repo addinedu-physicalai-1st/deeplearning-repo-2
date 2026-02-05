@@ -21,8 +21,9 @@ packages = ["src/ai_body"]
 monitor-shared = { workspace = true }
 
 [tool.uv]
-# macOS x86_64에서 jaxlib 0.5.3 제외 (wheel이 없음)
-# 모든 플랫폼에서 0.5.3 제외 (macOS x86_64에서만 문제가 있지만, 다른 플랫폼에서는 영향 없음)
+# macOS x86_64에서 jaxlib 완전히 제외 (wheel이 없음)
+# constraint-dependencies는 버전 제약만 가능하므로, 환경 변수 UV_CONSTRAINT_DEPENDENCIES 사용 권장
+# 또는 uv sync 실행 시: UV_CONSTRAINT_DEPENDENCIES="jaxlib!=0.5.3" uv sync
 constraint-dependencies = [
     "jaxlib!=0.5.3",
 ]

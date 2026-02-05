@@ -155,6 +155,12 @@ def main():
             
             cwd = root_dir / config["path"]
             
+            # macOS x86_64에서 ai_body 실행 시 jaxlib 제외를 위한 환경 변수 설정
+            env = os.environ.copy()
+            if name == "ai_body":
+                # macOS x86_64에서 jaxlib 0.5.3 제외
+                env["UV_CONSTRAINT_DEPENDENCIES"] = "jaxlib!=0.5.3"
+            
             # subprocess.Popen으로 실행
             p = subprocess.Popen(
                 config["cmd"],
@@ -163,7 +169,8 @@ def main():
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                env=env
             )
             processes[name] = p
             
