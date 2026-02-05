@@ -57,11 +57,31 @@ jobs:
         fi
         cd ../..
         
+    - name: Remove jax/jaxlib before starting ai_body (macOS x86_64)
+      if: runner.os == 'macOS'
+      run: |
+        # macOS x86_64에서 ai_body 시작 전에 jax/jaxlib 제거
+        if [[ "$(uname -m)" == "x86_64" ]]; then
+          echo "Removing jax/jaxlib before starting ai_body..."
+          uv pip uninstall -y jax jaxlib 2>/dev/null || true
+          # ai_body 디렉토리에서도 제거
+          cd apps/ai_body
+          uv pip uninstall -y jax jaxlib 2>/dev/null || true
+          cd ../..
+          echo "✅ jax/jaxlib removed"
+        fi
+        
     - name: Start ai_body server
       run: |
         # ai_body 서버 시작 (Port 8003)
         cd apps/ai_body
-        uv run python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
+        # macOS x86_64에서 jaxlib 문제를 피하기 위해 --no-sync 사용
+        if [[ "$(uname -m)" == "x86_64" ]] && [[ "$RUNNER_OS" == "macOS" ]]; then
+          # --no-sync로 의존성 재확인 방지
+          uv run --no-sync python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
+        else
+          uv run python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
+        fi
         echo $! > /tmp/ai_body.pid
         cd ../..
         
