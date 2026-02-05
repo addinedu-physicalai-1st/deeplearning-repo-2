@@ -78,7 +78,16 @@ async def start_session(api_key: str = Depends(api_key_header), db: Session = De
 @app.get("/sessions", response_model=List[SessionSummary])
 async def get_sessions(api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
     sessions = db.query(models.MonitoringSession).filter(models.MonitoringSession.end_time != None).order_by(models.MonitoringSession.start_time.desc()).all()
-    return sessions
+    return [
+        SessionSummary(
+            session_id=s.id,
+            start_time=s.start_time,
+            end_time=s.end_time,
+            focus_ratio=s.focus_ratio,
+            distraction_count=s.distraction_count,
+            llm_comment=s.llm_comment
+        ) for s in sessions
+    ]
 
 @app.post("/sessions/stop/{session_id}", response_model=SessionSummary)
 async def stop_session(session_id: str, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):

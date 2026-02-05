@@ -229,11 +229,12 @@ class MonitoringPage(QWidget):
         setattr(self, f"stat_{key}", val)
 
 class ReportPage(QWidget):
-    """모니터링 종료 후 리포트 화면 (FM-501)"""
+    """모니터링 종료 후 리포트 화면 (통계 중심)"""
     home_requested = pyqtSignal()
-    def __init__(self, network_client):
+    llm_analysis_requested = pyqtSignal(str) # session_id
+    
+    def __init__(self):
         super().__init__()
-        self.network_client = network_client
         self.current_session_id = None
         self.init_ui()
 
@@ -243,9 +244,10 @@ class ReportPage(QWidget):
 
         card = QFrame()
         card.setObjectName("Card")
-        card.setFixedSize(600, 600)
+        card.setFixedSize(500, 450)
         card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(15)
+        card_layout.setSpacing(30)
+        card_layout.setContentsMargins(40, 40, 40, 40)
 
         title = QLabel("SESSION REPORT")
         title.setObjectName("Title")
@@ -253,36 +255,31 @@ class ReportPage(QWidget):
 
         # Stats Grid
         stats_grid = QGridLayout()
+        stats_grid.setSpacing(20)
         self.add_report_stat(stats_grid, "FOCUS RATIO", "0%", 0, 0, "ratio")
         self.add_report_stat(stats_grid, "DISTRACTIONS", "0", 0, 1, "dist")
         self.add_report_stat(stats_grid, "DURATION", "00:00", 1, 0, "duration")
         card_layout.addLayout(stats_grid)
 
-        # LLM Feedback Section
-        feedback_header = QHBoxLayout()
-        feedback_label = QLabel("AI FEEDBACK")
-        feedback_label.setObjectName("StatLabel")
-        feedback_header.addWidget(feedback_label)
+        # Buttons at the bottom
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(15)
         
         self.llm_btn = QPushButton("LLM 분석 시작")
         self.llm_btn.setObjectName("SecondaryBtn")
-        self.llm_btn.setFixedWidth(150)
-        self.llm_btn.clicked.connect(self.start_llm_analysis)
-        feedback_header.addWidget(self.llm_btn)
-        card_layout.addLayout(feedback_header)
+        self.llm_btn.clicked.connect(lambda: self.llm_analysis_requested.emit(self.current_session_id))
+        btn_layout.addWidget(self.llm_btn)
         
-        self.feedback_text = QLabel("집중 패턴에 대한 AI 코멘트를 받아보세요.")
-        self.feedback_text.setWordWrap(True)
-        self.feedback_text.setStyleSheet("font-size: 15px; color: #E0E0E0; background: #2D2D2D; padding: 15px; border-radius: 8px; min-height: 100px;")
-        self.feedback_text.setAlignment(Qt.AlignmentFlag.AlignTop)
-        card_layout.addWidget(self.feedback_text)
-
         home_btn = QPushButton("BACK TO HOME")
         home_btn.setObjectName("PrimaryBtn")
         home_btn.clicked.connect(self.home_requested.emit)
-        card_layout.addWidget(home_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
+        btn_layout.addWidget(home_btn)
+        
+        card_layout.addLayout(btn_layout)
         layout.addWidget(card)
+
+    def set_llm_button_visible(self, visible: bool):
+        self.llm_btn.setVisible(visible)
 
     def add_report_stat(self, layout, label, value, r, c, key):
         vbox = QVBoxLayout()
@@ -297,11 +294,6 @@ class ReportPage(QWidget):
         self.report_ratio.setText(f"{int(data.get('focus_ratio', 0))}%")
         self.report_dist.setText(str(data.get('distraction_count', 0)))
         
-        # Reset LLM state
-        self.llm_btn.setEnabled(True)
-        self.llm_btn.setText("LLM 분석 시작")
-        self.feedback_text.setText(data.get('llm_comment') or "집중 패턴에 대한 AI 코멘트를 받아보세요.")
-        
         try:
             start = datetime.fromisoformat(data['start_time'].replace('Z', ''))
             end = datetime.fromisoformat(data['end_time'].replace('Z', ''))
@@ -312,25 +304,62 @@ class ReportPage(QWidget):
         except:
             self.report_duration.setText("00:00")
 
-    def start_llm_analysis(self):
-        if not self.current_session_id: return
-        
-        self.llm_btn.setEnabled(False)
-        self.llm_btn.setText("분석 중...")
-        self.feedback_text.setText("AI가 당신의 집중 패턴을 분석하고 있습니다. 잠시만 기다려주세요...")
-        
-        # 별도 스레드 대신 간단하게 처리
-        QTimer.singleShot(100, self._run_llm_request)
+class LlmAnalysisPage(QWidget):
+    """LLM 분석 전용 화면"""
+    home_requested = pyqtSignal()
+    
+    def __init__(self, network_client):
+        super().__init__()
+        self.network_client = network_client
+        self.init_ui()
 
-    def _run_llm_request(self):
-        result = self.network_client.request_llm_feedback(self.current_session_id)
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QFrame()
+        card.setObjectName("Card")
+        card.setFixedSize(700, 550)
+        card_layout = QVBoxLayout(card)
+        card_layout.setSpacing(20)
+        card_layout.setContentsMargins(40, 40, 40, 40)
+
+        title = QLabel("AI FOCUS ANALYSIS")
+        title.setObjectName("Title")
+        card_layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Feedback Area
+        self.feedback_text = QLabel("AI가 당신의 집중 패턴을 분석하고 있습니다. 잠시만 기다려주세요...")
+        self.feedback_text.setWordWrap(True)
+        self.feedback_text.setStyleSheet("""
+            font-size: 16px; 
+            color: #E0E0E0; 
+            background: #2D2D2D; 
+            padding: 25px; 
+            border-radius: 12px;
+            line-height: 1.6;
+        """)
+        self.feedback_text.setAlignment(Qt.AlignmentFlag.AlignTop)
+        card_layout.addWidget(self.feedback_text)
+
+        home_btn = QPushButton("BACK TO HOME")
+        home_btn.setObjectName("PrimaryBtn")
+        home_btn.clicked.connect(self.home_requested.emit)
+        card_layout.addWidget(home_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(card)
+
+    def start_analysis(self, session_id):
+        self.feedback_text.setText("AI가 당신의 집중 패턴을 분석하고 있습니다. 잠시만 기다려주세요...")
+        # 비동기 요청을 위해 타이머 사용
+        QTimer.singleShot(100, lambda: self._run_request(session_id))
+
+    def _run_request(self, session_id):
+        result = self.network_client.request_llm_feedback(session_id)
         if result and result.get('llm_comment'):
             self.feedback_text.setText(result['llm_comment'])
-            self.llm_btn.setText("분석 완료")
         else:
-            self.feedback_text.setText("분석에 실패했습니다. 나중에 다시 시도해주세요.")
-            self.llm_btn.setEnabled(True)
-            self.llm_btn.setText("다시 시도")
+            self.feedback_text.setText("분석 중 오류가 발생했습니다. 나중에 다시 시도해주세요.")
 
 from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
 
@@ -429,12 +458,14 @@ class MainWindow(QMainWindow):
 
         self.main_page = MainPage()
         self.monitoring_page = MonitoringPage()
-        self.report_page = ReportPage(self.network_client)
+        self.report_page = ReportPage()
+        self.analysis_page = LlmAnalysisPage(self.network_client)
         self.history_page = HistoryPage(self.network_client)
 
         self.stack.addWidget(self.main_page)
         self.stack.addWidget(self.monitoring_page)
         self.stack.addWidget(self.report_page)
+        self.stack.addWidget(self.analysis_page)
         self.stack.addWidget(self.history_page)
 
         # Signals
@@ -442,6 +473,8 @@ class MainWindow(QMainWindow):
         self.main_page.history_requested.connect(self.show_history)
         self.monitoring_page.stop_requested.connect(self.stop_session)
         self.report_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.report_page.llm_analysis_requested.connect(self.show_analysis)
+        self.analysis_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.history_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
 
         # Timers
@@ -463,14 +496,11 @@ class MainWindow(QMainWindow):
         self.current_session_id = None
 
     def start_session(self):
-        # 1. 서버에 세션 시작 요청
         session_data = self.network_client.start_session()
-        
         if session_data and session_data.get("session_id"):
             self.current_session_id = session_data.get("session_id")
             logger.info(f"Session started on server: {self.current_session_id}")
             
-            # 정상 연결 시에만 모니터링 시작
             self.is_monitoring = True
             self.start_time = time.time()
             self.distraction_count = 0
@@ -478,11 +508,10 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.monitoring_page)
             self.inference_timer.start(3000)
         else:
-            # 서버 연결 실패 시 시작 차단
             logger.error("Failed to connect to Operation Server.")
             QMessageBox.critical(self, "Connection Error", 
                                 "운영 서버와 연결할 수 없습니다.\n서버 상태를 확인하고 다시 시도해주세요.")
-            self.check_server_connection() # 상태 재확인
+            self.check_server_connection()
 
     def stop_session(self):
         if not self.is_monitoring: return
@@ -490,12 +519,10 @@ class MainWindow(QMainWindow):
         self.is_monitoring = False
         self.inference_timer.stop()
         
-        # 1. 서버에 종료 요청
         summary = None
         if self.current_session_id and not str(self.current_session_id).startswith("local_"):
             summary = self.network_client.stop_session(self.current_session_id)
         
-        # 2. 서버 응답 실패 시 로컬 요약 생성
         if not summary:
             elapsed = int(time.time() - self.start_time)
             summary = {
@@ -503,14 +530,17 @@ class MainWindow(QMainWindow):
                 "focus_ratio": max(0, 100 - (self.distraction_count * 2)),
                 "distraction_count": self.distraction_count,
                 "start_time": datetime.fromtimestamp(self.start_time).isoformat(),
-                "end_time": datetime.now().isoformat(),
-                "llm_comment": "서버 응답이 없습니다. 로컬 통계입니다."
+                "end_time": datetime.now().isoformat()
             }
         
-        # 3. 확실한 화면 전환
         self.report_page.set_report_data(summary)
+        self.report_page.set_llm_button_visible(True) # 새로 종료된 세션은 분석 버튼 보임
         self.stack.setCurrentWidget(self.report_page)
         self.current_session_id = None
+
+    def show_analysis(self, session_id):
+        self.analysis_page.start_analysis(session_id)
+        self.stack.setCurrentWidget(self.analysis_page)
 
     def show_history(self):
         self.history_page.load_data()
@@ -518,6 +548,7 @@ class MainWindow(QMainWindow):
 
     def show_report_detail(self, session_data):
         self.report_page.set_report_data(session_data)
+        self.report_page.set_llm_button_visible(False) # 과거 기록 조회 시에는 버튼 숨김
         self.stack.setCurrentWidget(self.report_page)
 
     def check_server_connection(self):
