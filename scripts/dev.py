@@ -112,6 +112,96 @@ def log_relay(name, process, color):
             print(f"{color}[{name}]{RESET} {line.strip()}")
     process.stdout.close()
 
+def find_balanced_brace_block(text, start_pos):
+    """
+    중첩된 중괄호를 안전하게 처리하여 완전한 블록의 끝 위치를 찾습니다.
+    { name = "..." } 형태의 블록을 찾아 시작과 끝 위치를 반환합니다.
+    
+    Returns:
+        tuple: (start_pos, end_pos) 또는 (None, None) if not found
+    """
+    if start_pos >= len(text) or text[start_pos] != '{':
+        return None, None
+    
+    brace_count = 0
+    i = start_pos
+    
+    while i < len(text):
+        char = text[i]
+        
+        # 문자열 내부인지 확인 (따옴표 처리)
+        if char == '"':
+            i += 1
+            # 문자열 끝까지 건너뛰기
+            while i < len(text) and text[i] != '"':
+                if text[i] == '\\':
+                    i += 1  # 이스케이프 문자 건너뛰기
+                i += 1
+            if i < len(text):
+                i += 1  # 닫는 따옴표 건너뛰기
+            continue
+        
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                # 완전한 블록을 찾았습니다
+                return start_pos, i + 1
+        
+        i += 1
+    
+    return None, None
+
+def remove_dependency_entry(content, package_name):
+    """
+    dependencies 배열에서 특정 패키지 항목을 안전하게 제거합니다.
+    중첩된 중괄호를 올바르게 처리합니다.
+    """
+    max_iterations = 50  # 무한 루프 방지
+    modified = True
+    
+    for _ in range(max_iterations):
+        if not modified:
+            break
+        
+        modified = False
+        # name = "package_name" 패턴 찾기
+        pattern = rf'name\s*=\s*"{re.escape(package_name)}"'
+        
+        for match in re.finditer(pattern, content):
+            # 매칭된 위치에서 앞으로 거슬러 올라가서 { 찾기
+            start_pos = match.start()
+            
+            # 앞으로 거슬러 올라가서 { 찾기
+            brace_start = start_pos
+            while brace_start > 0:
+                brace_start -= 1
+                if content[brace_start] == '{':
+                    # 중괄호 블록의 끝 찾기
+                    block_start, block_end = find_balanced_brace_block(content, brace_start)
+                    if block_start is not None and block_end is not None:
+                        # 블록 제거 (앞뒤 쉼표와 공백도 함께 처리)
+                        before = content[:block_start]
+                        after = content[block_end:]
+                        
+                        # 앞의 쉼표 제거
+                        before = re.sub(r',\s*$', '', before.rstrip())
+                        # 뒤의 쉼표 제거
+                        after = re.sub(r'^\s*,?\s*', '', after.lstrip())
+                        
+                        content = before + after
+                        modified = True
+                        break
+                elif content[brace_start] in ['\n', '\r'] and brace_start < start_pos - 100:
+                    # 너무 멀리 가면 중단
+                    break
+        
+        # 쉼표 정리 (연속된 쉼표 제거)
+        content = re.sub(r',\s*,', ',', content)
+    
+    return content
+
 def remove_jaxlib_from_lockfile(lock_path):
     """uv.lock에서 jax/jaxlib 관련 항목 제거 (macOS x86_64에서 wheel이 없어서 설치 실패 방지)"""
     if not lock_path.exists():
@@ -126,27 +216,15 @@ def remove_jaxlib_from_lockfile(lock_path):
         # 모든 패키지 섹션을 제거하기 위해 반복 실행
         for package_name in ["jax", "jaxlib"]:
             while True:
-                pattern = rf'\[\[package\]\]\nname = "{package_name}".*?(?=\n\[\[package\]\]|\Z)'
+                pattern = rf'\[\[package\]\]\nname = "{re.escape(package_name)}".*?(?=\n\[\[package\]\]|\Z)'
                 new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
                 if new_content == content:
                     break
                 content = new_content
         
-        # 2. dependencies 배열에서 jax와 jaxlib 항목 제거
-        # 중첩된 구조를 처리하기 위해 더 정확한 패턴 사용
-        # { name = "jax" 또는 "jaxlib", ... } 형태 (source = { ... } 같은 중첩 구조 포함)
-        # 반복 실행하여 모든 항목 제거
+        # 2. dependencies 배열에서 jax와 jaxlib 항목 제거 (안전한 중괄호 매칭 사용)
         for package_name in ["jax", "jaxlib"]:
-            max_iterations = 20  # 무한 루프 방지
-            for _ in range(max_iterations):
-                # 중첩된 중괄호를 처리하기 위해 더 정확한 패턴
-                # { name = "jax" 또는 "jaxlib" 부터 }, 까지 매칭 (중첩 구조 포함)
-                # source = { registry = "..." } 같은 중첩 구조를 처리하기 위해 .*? 사용
-                pattern = rf'\s*\{\s*name\s*=\s*"{package_name}".*?\},?\s*\n'
-                new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
-                if new_content == content:
-                    break
-                content = new_content
+            content = remove_dependency_entry(content, package_name)
         
         # 3. 잘못된 구문 수정: dependencies = [marker = "...", }, 형태 제거
         pattern = r'dependencies = \[\s*marker\s*=\s*"[^"]*"\s*\},\s*\n'

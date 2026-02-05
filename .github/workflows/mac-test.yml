@@ -1,0 +1,26 @@
+name: MacOS x86 Test
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: macos-13  # macos-13은 Intel(x86) 기반의 마지막 버전입니다.
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install opencv-python mediapipe PyQt5 numpy
+        
+    - name: Run Test (Dry Run)
+      run: |
+        # GUI가 없는 환경이므로 xvfb(가상 디스플레이)를 사용하거나
+        # 단순히 import가 잘 되는지, 문법 에러가 없는지 확인합니다.
+        python -c "import cv2; import mediapipe; import PyQt5; print('Imports successful on macOS x86')"
