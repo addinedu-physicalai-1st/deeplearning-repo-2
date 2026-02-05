@@ -1,9 +1,9 @@
-name: MacOS x86 Test - AI Servers
+name: MacOS x86 Test - AI Body Server
 
 on: [push]
 
 jobs:
-  test-ai-servers:
+  test-ai-body:
     runs-on: macos-15-intel  # macOS Intel (x86_64) 기반
     
     steps:
@@ -42,30 +42,10 @@ jobs:
       run: |
         uv sync --no-dev
         
-    - name: Create .env files for all servers
+    - name: Create .env file for ai_body
       run: |
         # 공통 API_KEY 설정
         TEST_API_KEY="test-api-key-for-ci"
-        
-        # ai_head (Port 8001)
-        cd apps/ai_head
-        cp .env.example .env
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
-        else
-          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
-        fi
-        cd ../..
-        
-        # ai_emotion (Port 8002)
-        cd apps/ai_emotion
-        cp .env.example .env
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
-        else
-          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
-        fi
-        cd ../..
         
         # ai_body (Port 8003)
         cd apps/ai_body
@@ -77,101 +57,40 @@ jobs:
         fi
         cd ../..
         
-        # ai_interface (Port 8010)
-        cd apps/ai_interface
-        cp .env.example .env
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
-        else
-          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
-        fi
-        cd ../..
-        
-        # llm_server (Port 8004)
-        cd apps/llm_server
-        cp .env.example .env
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
-        else
-          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
-        fi
-        # Ollama 모델은 선택사항이므로 기본값 유지
-        cd ../..
-        
-    - name: Start all AI servers
+    - name: Start ai_body server
       run: |
-        # ai_head 서버 시작 (Port 8001)
-        cd apps/ai_head
-        uv run python src/ai_head/main.py > /tmp/ai_head.log 2>&1 &
-        echo $! > /tmp/ai_head.pid
-        cd ../..
-        
-        # ai_emotion 서버 시작 (Port 8002)
-        cd apps/ai_emotion
-        uv run python src/ai_emotion/main.py > /tmp/ai_emotion.log 2>&1 &
-        echo $! > /tmp/ai_emotion.pid
-        cd ../..
-        
         # ai_body 서버 시작 (Port 8003)
         cd apps/ai_body
         uv run python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
         echo $! > /tmp/ai_body.pid
         cd ../..
         
-        # ai_interface 서버 시작 (Port 8010)
-        cd apps/ai_interface
-        uv run python src/ai_interface/main.py > /tmp/ai_interface.log 2>&1 &
-        echo $! > /tmp/ai_interface.pid
-        cd ../..
-        
-        # llm_server 서버 시작 (Port 8004)
-        cd apps/llm_server
-        uv run python src/llm_server/main.py > /tmp/llm_server.log 2>&1 &
-        echo $! > /tmp/llm_server.pid
-        cd ../..
-        
-        echo "Waiting for servers to start..."
+        echo "Waiting for ai_body server to start..."
         sleep 2  # 초기 시작 대기
         
-    - name: Check server processes
+    - name: Check ai_body process
       run: |
-        # 각 서버 프로세스가 실행 중인지 확인
-        check_process() {
-          local name=$1
-          local pid_file="/tmp/${name}.pid"
-          
-          if [ ! -f "$pid_file" ]; then
-            echo "❌ $name: PID file not found"
-            return 1
-          fi
-          
-          local pid=$(cat "$pid_file")
-          if ps -p "$pid" > /dev/null 2>&1; then
-            echo "✅ $name: Process running (PID: $pid)"
-            return 0
-          else
-            echo "❌ $name: Process not running (PID: $pid)"
-            echo "Log:"
-            cat "/tmp/${name}.log" || true
-            return 1
-          fi
-        }
+        # ai_body 프로세스가 실행 중인지 확인
+        pid_file="/tmp/ai_body.pid"
         
-        all_ok=true
-        check_process "ai_head" || all_ok=false
-        check_process "ai_emotion" || all_ok=false
-        check_process "ai_body" || all_ok=false
-        check_process "ai_interface" || all_ok=false
-        check_process "llm_server" || all_ok=false
-        
-        if [ "$all_ok" = false ]; then
-          echo "Some servers failed to start. Exiting."
+        if [ ! -f "$pid_file" ]; then
+          echo "❌ ai_body: PID file not found"
           exit 1
         fi
         
-    - name: Wait for servers to be ready
+        pid=$(cat "$pid_file")
+        if ps -p "$pid" > /dev/null 2>&1; then
+          echo "✅ ai_body: Process running (PID: $pid)"
+        else
+          echo "❌ ai_body: Process not running (PID: $pid)"
+          echo "Log:"
+          cat "/tmp/ai_body.log" || true
+          exit 1
+        fi
+        
+    - name: Wait for ai_body to be ready
       run: |
-        # 각 서버가 포트에서 리스닝할 때까지 대기 (최대 30초)
+        # ai_body가 포트에서 리스닝할 때까지 대기 (최대 30초)
         wait_for_port() {
           local port=$1
           local name=$2
@@ -191,82 +110,10 @@ jobs:
           return 1
         }
         
-        wait_for_port 8001 "ai_head" || (cat /tmp/ai_head.log && exit 1)
-        wait_for_port 8002 "ai_emotion" || (cat /tmp/ai_emotion.log && exit 1)
         wait_for_port 8003 "ai_body" || (cat /tmp/ai_body.log && exit 1)
-        wait_for_port 8004 "llm_server" || (cat /tmp/llm_server.log && exit 1)
-        wait_for_port 8010 "ai_interface" || (cat /tmp/ai_interface.log && exit 1)
         
-        echo "All servers are ready!"
+        echo "ai_body server is ready!"
         sleep 2  # 추가 안정화 시간
-        
-    - name: Test ai_head health endpoint
-      run: |
-        test_health() {
-          local url=$1
-          local name=$2
-          local max_attempts=5
-          local attempt=0
-          
-          while [ $attempt -lt $max_attempts ]; do
-            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
-            http_code=$(echo "$response" | tail -n1)
-            body=$(echo "$response" | head -n-1)
-            
-            if [ "$http_code" -eq 200 ]; then
-              echo "✅ $name health check passed: $body"
-              return 0
-            fi
-            
-            attempt=$((attempt + 1))
-            if [ $attempt -lt $max_attempts ]; then
-              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
-              sleep 2
-            fi
-          done
-          
-          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
-          echo "Response: $body"
-          echo "Log:"
-          cat "/tmp/${name}.log" || true
-          return 1
-        }
-        
-        test_health "http://localhost:8001/health" "ai_head"
-        
-    - name: Test ai_emotion health endpoint
-      run: |
-        test_health() {
-          local url=$1
-          local name=$2
-          local max_attempts=5
-          local attempt=0
-          
-          while [ $attempt -lt $max_attempts ]; do
-            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
-            http_code=$(echo "$response" | tail -n1)
-            body=$(echo "$response" | head -n-1)
-            
-            if [ "$http_code" -eq 200 ]; then
-              echo "✅ $name health check passed: $body"
-              return 0
-            fi
-            
-            attempt=$((attempt + 1))
-            if [ $attempt -lt $max_attempts ]; then
-              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
-              sleep 2
-            fi
-          done
-          
-          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
-          echo "Response: $body"
-          echo "Log:"
-          cat "/tmp/${name}.log" || true
-          return 1
-        }
-        
-        test_health "http://localhost:8002/health" "ai_emotion"
         
     - name: Test ai_body health endpoint
       run: |
@@ -302,110 +149,11 @@ jobs:
         
         test_health "http://localhost:8003/health" "ai_body"
         
-    - name: Test ai_interface health endpoint
-      run: |
-        test_health() {
-          local url=$1
-          local name=$2
-          local max_attempts=5
-          local attempt=0
-          
-          while [ $attempt -lt $max_attempts ]; do
-            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
-            http_code=$(echo "$response" | tail -n1)
-            body=$(echo "$response" | head -n-1)
-            
-            if [ "$http_code" -eq 200 ]; then
-              echo "✅ $name health check passed: $body"
-              return 0
-            fi
-            
-            attempt=$((attempt + 1))
-            if [ $attempt -lt $max_attempts ]; then
-              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
-              sleep 2
-            fi
-          done
-          
-          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
-          echo "Response: $body"
-          echo "Log:"
-          cat "/tmp/${name}.log" || true
-          return 1
-        }
-        
-        test_health "http://localhost:8010/health" "ai_interface"
-        
-    - name: Test llm_server health endpoint
-      run: |
-        test_health() {
-          local url=$1
-          local name=$2
-          local max_attempts=5
-          local attempt=0
-          
-          while [ $attempt -lt $max_attempts ]; do
-            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
-            http_code=$(echo "$response" | tail -n1)
-            body=$(echo "$response" | head -n-1)
-            
-            if [ "$http_code" -eq 200 ]; then
-              echo "✅ $name health check passed: $body"
-              return 0
-            fi
-            
-            attempt=$((attempt + 1))
-            if [ $attempt -lt $max_attempts ]; then
-              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
-              sleep 2
-            fi
-          done
-          
-          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
-          echo "Response: $body"
-          echo "Log:"
-          cat "/tmp/${name}.log" || true
-          return 1
-        }
-        
-        test_health "http://localhost:8004/health" "llm_server"
-        
-    - name: Verify all servers are running
-      run: |
-        servers=("ai_head:8001" "ai_emotion:8002" "ai_body:8003" "ai_interface:8010" "llm_server:8004")
-        all_running=true
-        
-        for server_info in "${servers[@]}"; do
-          IFS=':' read -r name port <<< "$server_info"
-          pid_file="/tmp/${name}.pid"
-          
-          if [ -f "$pid_file" ]; then
-            pid=$(cat "$pid_file")
-            if ps -p "$pid" > /dev/null 2>&1; then
-              echo "✅ $name (Port $port) is running (PID: $pid)"
-            else
-              echo "❌ $name (Port $port) is not running"
-              echo "Log:"
-              cat "/tmp/${name}.log" || true
-              all_running=false
-            fi
-          else
-            echo "❌ $name PID file not found"
-            all_running=false
-          fi
-        done
-        
-        if [ "$all_running" = false ]; then
-          exit 1
-        fi
-        
-    - name: Stop all servers
+    - name: Stop ai_body server
       if: always()
       run: |
-        for pid_file in /tmp/ai_head.pid /tmp/ai_emotion.pid /tmp/ai_body.pid /tmp/ai_interface.pid /tmp/llm_server.pid; do
-          if [ -f "$pid_file" ]; then
-            pid=$(cat "$pid_file")
-            kill "$pid" 2>/dev/null || true
-            rm "$pid_file" || true
-          fi
-        done
+        if [ -f "/tmp/ai_body.pid" ]; then
+          pid=$(cat "/tmp/ai_body.pid")
+          kill "$pid" 2>/dev/null || true
+          rm "/tmp/ai_body.pid" || true
+        fi
