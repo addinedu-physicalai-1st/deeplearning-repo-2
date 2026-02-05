@@ -22,24 +22,55 @@ jobs:
     - name: Install dependencies (macOS x86_64)
       if: runner.os == 'macOS'
       run: |
-        # macOS x86_64에서 jaxlib가 설치 실패해도 계속 진행
+        # macOS x86_64에서 jaxlib만 제외하고 나머지 의존성 설치
         if [[ "$(uname -m)" == "x86_64" ]]; then
-          echo "Installing dependencies (jaxlib may fail on macOS x86_64)..."
-          # jaxlib 제외하고 sync 시도
-          uv sync --no-dev 2>&1 | grep -v "jaxlib" || {
-            echo "⚠️  uv sync had errors, removing jax/jaxlib and retrying..."
-            uv pip uninstall -y jax jaxlib 2>/dev/null || true
-            # jaxlib 없이 다시 sync
-            uv sync --no-dev || true
-          }
-          # 최종적으로 jax/jaxlib 제거
+          echo "Installing dependencies (excluding jax/jaxlib on macOS x86_64)..."
+          
+          # uv sync 실행 (jaxlib 실패해도 계속 진행하도록)
+          set +e  # 에러 발생해도 계속 진행
+          uv sync --no-dev 2>&1 | tee /tmp/uv_sync.log
+          SYNC_EXIT_CODE=${PIPESTATUS[0]}
+          set -e  # 다시 에러 시 중단 모드로
+          
+          # jaxlib 관련 에러만 무시하고 나머지 패키지는 설치되었는지 확인
+          if [ $SYNC_EXIT_CODE -ne 0 ]; then
+            echo "⚠️  uv sync had errors (likely jaxlib), but continuing..."
+            # jaxlib 에러인지 확인
+            if grep -q "jaxlib" /tmp/uv_sync.log; then
+              echo "✅ jaxlib error detected, removing jax/jaxlib and continuing..."
+              uv pip uninstall -y jax jaxlib 2>/dev/null || true
+            fi
+          fi
+          
+          # 최종적으로 jax/jaxlib 제거 (혹시 설치되었을 수 있음)
           uv pip uninstall -y jax jaxlib 2>/dev/null || true
-          # opencv-python이 설치되었는지 확인
-          echo "Verifying opencv-python installation..."
-          uv pip list | grep -i opencv || {
-            echo "⚠️  opencv-python not found, installing..."
-            uv pip install opencv-python
-          }
+          
+          # 필수 패키지들이 설치되었는지 확인하고 없으면 설치
+          echo "Verifying essential packages..."
+          MISSING_PACKAGES=()
+          
+          if ! uv pip show fastapi >/dev/null 2>&1; then
+            MISSING_PACKAGES+=("fastapi")
+          fi
+          if ! uv pip show uvicorn >/dev/null 2>&1; then
+            MISSING_PACKAGES+=("uvicorn")
+          fi
+          if ! uv pip show opencv-python >/dev/null 2>&1; then
+            MISSING_PACKAGES+=("opencv-python")
+          fi
+          if ! uv pip show mediapipe >/dev/null 2>&1; then
+            MISSING_PACKAGES+=("mediapipe")
+          fi
+          if ! uv pip show numpy >/dev/null 2>&1; then
+            MISSING_PACKAGES+=("numpy")
+          fi
+          
+          if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+          then
+            echo "⚠️  Missing packages detected: ${MISSING_PACKAGES[*]}, installing..."
+            uv pip install "${MISSING_PACKAGES[@]}"
+          fi
+          
           echo "✅ Dependencies installed (jax/jaxlib excluded)"
         else
           uv sync --no-dev
@@ -90,21 +121,18 @@ jobs:
           # jaxlib를 완전히 제거하고 시작
           uv pip uninstall -y jax jaxlib 2>/dev/null || true
           
-          # uv run 실행 시 jaxlib 설치를 방지하기 위해
-          # 환경 변수로 UV_NO_SYNC 설정 시도 (지원되는 경우)
-          # 또는 직접 가상 환경 사용
+          # 가상 환경 직접 사용 (uv run의 의존성 재확인 방지)
           cd ../..
-          # uv의 가상 환경 경로 확인
           VENV_PATH=".venv"
           if [ -d "$VENV_PATH" ]; then
             # 가상 환경 활성화하고 Python 실행
             source "$VENV_PATH/bin/activate"
             # jaxlib 다시 제거
             pip uninstall -y jax jaxlib 2>/dev/null || true
-            # opencv-python 확인
-            python -c "import cv2" 2>/dev/null || {
-              echo "⚠️  cv2 not found, installing opencv-python..."
-              pip install opencv-python
+            # 필수 패키지 확인
+            python -c "import fastapi, uvicorn, cv2, mediapipe, numpy" 2>/dev/null || {
+              echo "⚠️  Some packages missing, installing..."
+              pip install fastapi uvicorn opencv-python mediapipe numpy 2>/dev/null || true
             }
             cd apps/ai_body
             python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
