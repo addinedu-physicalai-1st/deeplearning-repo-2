@@ -25,13 +25,21 @@ jobs:
         # macOS x86_64에서 jaxlib가 설치 실패해도 계속 진행
         if [[ "$(uname -m)" == "x86_64" ]]; then
           echo "Installing dependencies (jaxlib may fail on macOS x86_64)..."
-          uv sync --no-dev || {
-            echo "⚠️  uv sync had errors (possibly jaxlib), removing jax/jaxlib and retrying..."
+          # jaxlib 제외하고 sync 시도
+          uv sync --no-dev 2>&1 | grep -v "jaxlib" || {
+            echo "⚠️  uv sync had errors, removing jax/jaxlib and retrying..."
             uv pip uninstall -y jax jaxlib 2>/dev/null || true
+            # jaxlib 없이 다시 sync
             uv sync --no-dev || true
           }
           # 최종적으로 jax/jaxlib 제거
           uv pip uninstall -y jax jaxlib 2>/dev/null || true
+          # opencv-python이 설치되었는지 확인
+          echo "Verifying opencv-python installation..."
+          uv pip list | grep -i opencv || {
+            echo "⚠️  opencv-python not found, installing..."
+            uv pip install opencv-python
+          }
           echo "✅ Dependencies installed (jax/jaxlib excluded)"
         else
           uv sync --no-dev
@@ -77,31 +85,39 @@ jobs:
         # ai_body 서버 시작 (Port 8003)
         cd apps/ai_body
         
-        # macOS x86_64에서 jaxlib 문제를 피하기 위해
-        # uv run을 사용하되, jaxlib가 이미 제거된 상태에서 실행
-        # ai_body/pyproject.toml의 override 설정으로 jaxlib 설치 방지
-        uv run python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
-        SERVER_PID=$!
-        echo $SERVER_PID > /tmp/ai_body.pid
-        
-        # 잠시 대기 후 프로세스 상태 확인
-        sleep 2
-        
-        # macOS x86_64에서 jaxlib가 설치되었는지 확인하고 제거
+        # macOS x86_64에서 jaxlib 문제를 완전히 방지
         if [[ "$(uname -m)" == "x86_64" ]] && [[ "$RUNNER_OS" == "macOS" ]]; then
+          # jaxlib를 완전히 제거하고 시작
           uv pip uninstall -y jax jaxlib 2>/dev/null || true
-        fi
-        
-        # 프로세스가 실행 중인지 확인
-        if ! ps -p $SERVER_PID > /dev/null 2>&1; then
-          echo "⚠️  Server process ended, checking log..."
-          cat /tmp/ai_body.log || true
-          # jaxlib 문제일 수 있으므로 다시 제거하고 재시도
-          if [[ "$(uname -m)" == "x86_64" ]] && [[ "$RUNNER_OS" == "macOS" ]]; then
-            uv pip uninstall -y jax jaxlib 2>/dev/null || true
+          
+          # uv run 실행 시 jaxlib 설치를 방지하기 위해
+          # 환경 변수로 UV_NO_SYNC 설정 시도 (지원되는 경우)
+          # 또는 직접 가상 환경 사용
+          cd ../..
+          # uv의 가상 환경 경로 확인
+          VENV_PATH=".venv"
+          if [ -d "$VENV_PATH" ]; then
+            # 가상 환경 활성화하고 Python 실행
+            source "$VENV_PATH/bin/activate"
+            # jaxlib 다시 제거
+            pip uninstall -y jax jaxlib 2>/dev/null || true
+            # opencv-python 확인
+            python -c "import cv2" 2>/dev/null || {
+              echo "⚠️  cv2 not found, installing opencv-python..."
+              pip install opencv-python
+            }
+            cd apps/ai_body
+            python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
+            echo $! > /tmp/ai_body.pid
+          else
+            # 가상 환경이 없으면 uv run 사용
+            cd apps/ai_body
             uv run python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
             echo $! > /tmp/ai_body.pid
           fi
+        else
+          uv run python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
+          echo $! > /tmp/ai_body.pid
         fi
         
         cd ../..
