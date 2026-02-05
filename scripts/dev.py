@@ -121,9 +121,15 @@ def remove_jaxlib_from_lockfile(lock_path):
         content = lock_path.read_text(encoding='utf-8')
         original_content = content
         
-        # 1. jaxlib 패키지 섹션 전체 제거 ([[package]] name = "jaxlib" 부터 다음 [[package]] 또는 파일 끝까지)
-        pattern = r'\[\[package\]\]\s+name = "jaxlib"[^\[]*(?=\[\[package\]\]|$)'
-        content = re.sub(pattern, '', content, flags=re.MULTILINE | re.DOTALL)
+        # 1. jaxlib 패키지 섹션 전체 제거 (모든 버전)
+        # [[package]] 다음 줄에 name = "jaxlib"이 오는 패턴부터 다음 [[package]] 또는 파일 끝까지
+        # 모든 jaxlib 패키지 섹션을 제거하기 위해 반복 실행
+        while True:
+            pattern = r'\[\[package\]\]\nname = "jaxlib".*?(?=\n\[\[package\]\]|\Z)'
+            new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
+            if new_content == content:
+                break
+            content = new_content
         
         # 2. dependencies 배열에서 jaxlib 항목 제거
         # 단일 라인: { name = "jaxlib", ... },
@@ -143,6 +149,9 @@ def remove_jaxlib_from_lockfile(lock_path):
         
         # 5. 빈 dependencies 배열 정리
         content = re.sub(r'dependencies = \[\s*\]', 'dependencies = []', content)
+        
+        # 6. 연속된 빈 줄 정리 (최대 2개까지만 허용)
+        content = re.sub(r'\n\n\n+', '\n\n', content)
         
         if content != original_content:
             lock_path.write_text(content, encoding='utf-8')
