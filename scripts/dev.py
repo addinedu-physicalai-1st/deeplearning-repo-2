@@ -113,7 +113,7 @@ def log_relay(name, process, color):
     process.stdout.close()
 
 def remove_jaxlib_from_lockfile(lock_path):
-    """uv.lock에서 jaxlib 관련 항목 제거 (macOS x86_64에서 wheel이 없어서 설치 실패 방지)"""
+    """uv.lock에서 jax/jaxlib 관련 항목 제거 (macOS x86_64에서 wheel이 없어서 설치 실패 방지)"""
     if not lock_path.exists():
         return False
     
@@ -121,30 +121,32 @@ def remove_jaxlib_from_lockfile(lock_path):
         content = lock_path.read_text(encoding='utf-8')
         original_content = content
         
-        # 1. jaxlib 패키지 섹션 전체 제거 (모든 버전)
-        # [[package]] 다음 줄에 name = "jaxlib"이 오는 패턴부터 다음 [[package]] 또는 파일 끝까지
-        # 모든 jaxlib 패키지 섹션을 제거하기 위해 반복 실행
-        while True:
-            pattern = r'\[\[package\]\]\nname = "jaxlib".*?(?=\n\[\[package\]\]|\Z)'
-            new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
-            if new_content == content:
-                break
-            content = new_content
+        # 1. jax와 jaxlib 패키지 섹션 전체 제거 (모든 버전)
+        # [[package]] 다음 줄에 name = "jax" 또는 "jaxlib"이 오는 패턴부터 다음 [[package]] 또는 파일 끝까지
+        # 모든 패키지 섹션을 제거하기 위해 반복 실행
+        for package_name in ["jax", "jaxlib"]:
+            while True:
+                pattern = rf'\[\[package\]\]\nname = "{package_name}".*?(?=\n\[\[package\]\]|\Z)'
+                new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
+                if new_content == content:
+                    break
+                content = new_content
         
-        # 2. dependencies 배열에서 jaxlib 항목 제거
+        # 2. dependencies 배열에서 jax와 jaxlib 항목 제거
         # 중첩된 구조를 처리하기 위해 더 정확한 패턴 사용
-        # { name = "jaxlib", ... } 형태 (source = { ... } 같은 중첩 구조 포함)
-        # 반복 실행하여 모든 jaxlib 항목 제거
-        max_iterations = 20  # 무한 루프 방지
-        for _ in range(max_iterations):
-            # 중첩된 중괄호를 처리하기 위해 더 정확한 패턴
-            # { name = "jaxlib" 부터 }, 까지 매칭 (중첩 구조 포함)
-            # source = { registry = "..." } 같은 중첩 구조를 처리하기 위해 .*? 사용
-            pattern = r'\s*\{\s*name\s*=\s*"jaxlib".*?\},?\s*\n'
-            new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
-            if new_content == content:
-                break
-            content = new_content
+        # { name = "jax" 또는 "jaxlib", ... } 형태 (source = { ... } 같은 중첩 구조 포함)
+        # 반복 실행하여 모든 항목 제거
+        for package_name in ["jax", "jaxlib"]:
+            max_iterations = 20  # 무한 루프 방지
+            for _ in range(max_iterations):
+                # 중첩된 중괄호를 처리하기 위해 더 정확한 패턴
+                # { name = "jax" 또는 "jaxlib" 부터 }, 까지 매칭 (중첩 구조 포함)
+                # source = { registry = "..." } 같은 중첩 구조를 처리하기 위해 .*? 사용
+                pattern = rf'\s*\{\s*name\s*=\s*"{package_name}".*?\},?\s*\n'
+                new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
+                if new_content == content:
+                    break
+                content = new_content
         
         # 3. 잘못된 구문 수정: dependencies = [marker = "...", }, 형태 제거
         pattern = r'dependencies = \[\s*marker\s*=\s*"[^"]*"\s*\},\s*\n'
@@ -188,18 +190,18 @@ def remove_jaxlib_if_needed():
                 pass
 
 def sync_dependencies():
-    """의존성 동기화 (macOS x86_64에서 jaxlib 제외)"""
+    """의존성 동기화 (macOS x86_64에서 jax/jaxlib 제외)"""
     if sys.platform == "darwin":
         import platform
         if platform.machine() == "x86_64":
-            print("\n🔄 의존성 동기화 중... (macOS x86_64: jaxlib 제외)")
+            print("\n🔄 의존성 동기화 중... (macOS x86_64: jax/jaxlib 제외)")
             
-            # uv.lock에서 jaxlib 제거 (sync 전)
+            # uv.lock에서 jax/jaxlib 제거 (sync 전)
             lock_path = Path("uv.lock")
             if remove_jaxlib_from_lockfile(lock_path):
-                print("ℹ️  uv.lock에서 jaxlib 제거 완료")
+                print("ℹ️  uv.lock에서 jax/jaxlib 제거 완료")
             
-            # jaxlib 제거 (sync 전)
+            # jax/jaxlib 제거 (sync 전)
             remove_jaxlib_if_needed()
             
             # uv sync 실행 (실패해도 계속 진행)
@@ -215,11 +217,11 @@ def sync_dependencies():
             except Exception as e:
                 print(f"⚠️  uv sync 실행 중 오류: {e}, 계속 진행합니다...")
             
-            # uv.lock에서 jaxlib 다시 제거 (sync 후에 다시 추가되었을 수 있음)
+            # uv.lock에서 jax/jaxlib 다시 제거 (sync 후에 다시 추가되었을 수 있음)
             if remove_jaxlib_from_lockfile(lock_path):
-                print("ℹ️  uv.lock에서 jaxlib 재제거 완료")
+                print("ℹ️  uv.lock에서 jax/jaxlib 재제거 완료")
             
-            # jaxlib 제거 (sync 후 - 설치되었을 수 있음)
+            # jax/jaxlib 제거 (sync 후 - 설치되었을 수 있음)
             remove_jaxlib_if_needed()
             print("✅ 의존성 동기화 완료")
 
@@ -270,29 +272,30 @@ def main():
             
             cwd = root_dir / config["path"]
             
-            # macOS x86_64에서 ai_body 실행 시 jaxlib 제거 (wheel이 없어서 설치 실패 방지)
+            # macOS x86_64에서 ai_body 실행 시 jax/jaxlib 제거 (wheel이 없어서 설치 실패 방지)
             if name == "ai_body" and sys.platform == "darwin":
                 import platform
                 if platform.machine() == "x86_64":
-                    # uv.lock에서 jaxlib 제거 (uv run 실행 전)
+                    # uv.lock에서 jax/jaxlib 제거 (uv run 실행 전)
                     lock_path = root_dir / "uv.lock"
                     if remove_jaxlib_from_lockfile(lock_path):
-                        print(f"ℹ️  [{name}] uv.lock에서 jaxlib 제거 완료")
+                        print(f"ℹ️  [{name}] uv.lock에서 jax/jaxlib 제거 완료")
                     
-                    # jaxlib 제거 시도 (설치되어 있다면, 여러 번 시도)
-                    for _ in range(3):  # 최대 3번 시도
-                        try:
-                            result = subprocess.run(
-                                ["uv", "pip", "uninstall", "-y", "jaxlib"],
-                                cwd=cwd,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                check=False
-                            )
-                            if result.returncode != 0:
-                                break  # 제거할 것이 없으면 종료
-                        except Exception:
-                            break  # 오류 발생 시 종료
+                    # jax와 jaxlib 제거 시도 (설치되어 있다면, 여러 번 시도)
+                    for package in ["jax", "jaxlib"]:
+                        for _ in range(3):  # 최대 3번 시도
+                            try:
+                                result = subprocess.run(
+                                    ["uv", "pip", "uninstall", "-y", package],
+                                    cwd=cwd,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    check=False
+                                )
+                                if result.returncode != 0:
+                                    break  # 제거할 것이 없으면 종료
+                            except Exception:
+                                break  # 오류 발생 시 종료
             
             # subprocess.Popen으로 실행
             env = os.environ.copy()
