@@ -1,10 +1,10 @@
-name: MacOS x86 Test
+name: MacOS x86 Test - AI Servers
 
 on: [push]
 
 jobs:
-  build:
-    runs-on: macos-15-intel  # macos-13은 Intel(x86) 기반의 마지막 버전입니다.
+  test-ai-servers:
+    runs-on: macos-15-intel  # macOS Intel (x86_64) 기반
     
     steps:
     - uses: actions/checkout@v3
@@ -12,15 +12,225 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.10'
+        
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
         
     - name: Install dependencies
       run: |
-        pip install --upgrade pip
-        pip install opencv-python mediapipe PyQt5 numpy
+        uv sync --no-dev
         
-    - name: Run Test (Dry Run)
+    - name: Create .env files for all servers
       run: |
-        # GUI가 없는 환경이므로 xvfb(가상 디스플레이)를 사용하거나
-        # 단순히 import가 잘 되는지, 문법 에러가 없는지 확인합니다.
-        python -c "import cv2; import mediapipe; import PyQt5; print('Imports successful on macOS x86')"
+        # 공통 API_KEY 설정
+        TEST_API_KEY="test-api-key-for-ci"
+        
+        # ai_head (Port 8001)
+        cd apps/ai_head
+        cp .env.example .env
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        else
+          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        fi
+        cd ../..
+        
+        # ai_emotion (Port 8002)
+        cd apps/ai_emotion
+        cp .env.example .env
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        else
+          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        fi
+        cd ../..
+        
+        # ai_body (Port 8003)
+        cd apps/ai_body
+        cp .env.example .env
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        else
+          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        fi
+        cd ../..
+        
+        # ai_interface (Port 8010)
+        cd apps/ai_interface
+        cp .env.example .env
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        else
+          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        fi
+        cd ../..
+        
+        # llm_server (Port 8004)
+        cd apps/llm_server
+        cp .env.example .env
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          sed -i '' "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        else
+          sed -i "s/API_KEY=.*/API_KEY=$TEST_API_KEY/" .env
+        fi
+        # Ollama 모델은 선택사항이므로 기본값 유지
+        cd ../..
+        
+    - name: Start all AI servers
+      run: |
+        # ai_head 서버 시작 (Port 8001)
+        cd apps/ai_head
+        uv run python src/ai_head/main.py > /tmp/ai_head.log 2>&1 &
+        echo $! > /tmp/ai_head.pid
+        cd ../..
+        
+        # ai_emotion 서버 시작 (Port 8002)
+        cd apps/ai_emotion
+        uv run python src/ai_emotion/main.py > /tmp/ai_emotion.log 2>&1 &
+        echo $! > /tmp/ai_emotion.pid
+        cd ../..
+        
+        # ai_body 서버 시작 (Port 8003)
+        cd apps/ai_body
+        uv run python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
+        echo $! > /tmp/ai_body.pid
+        cd ../..
+        
+        # ai_interface 서버 시작 (Port 8010)
+        cd apps/ai_interface
+        uv run python src/ai_interface/main.py > /tmp/ai_interface.log 2>&1 &
+        echo $! > /tmp/ai_interface.pid
+        cd ../..
+        
+        # llm_server 서버 시작 (Port 8004)
+        cd apps/llm_server
+        uv run python src/llm_server/main.py > /tmp/llm_server.log 2>&1 &
+        echo $! > /tmp/llm_server.pid
+        cd ../..
+        
+        # 모든 서버가 시작될 때까지 대기
+        echo "Waiting for servers to start..."
+        sleep 10
+        
+    - name: Test ai_head health endpoint
+      run: |
+        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8001/health)
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | head -n-1)
+        
+        if [ "$http_code" -eq 200 ]; then
+          echo "✅ ai_head health check passed: $body"
+        else
+          echo "❌ ai_head health check failed: HTTP $http_code"
+          echo "Response: $body"
+          echo "Log:"
+          cat /tmp/ai_head.log || true
+          exit 1
+        fi
+        
+    - name: Test ai_emotion health endpoint
+      run: |
+        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8002/health)
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | head -n-1)
+        
+        if [ "$http_code" -eq 200 ]; then
+          echo "✅ ai_emotion health check passed: $body"
+        else
+          echo "❌ ai_emotion health check failed: HTTP $http_code"
+          echo "Response: $body"
+          echo "Log:"
+          cat /tmp/ai_emotion.log || true
+          exit 1
+        fi
+        
+    - name: Test ai_body health endpoint
+      run: |
+        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8003/health)
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | head -n-1)
+        
+        if [ "$http_code" -eq 200 ]; then
+          echo "✅ ai_body health check passed: $body"
+        else
+          echo "❌ ai_body health check failed: HTTP $http_code"
+          echo "Response: $body"
+          echo "Log:"
+          cat /tmp/ai_body.log || true
+          exit 1
+        fi
+        
+    - name: Test ai_interface health endpoint
+      run: |
+        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8010/health)
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | head -n-1)
+        
+        if [ "$http_code" -eq 200 ]; then
+          echo "✅ ai_interface health check passed: $body"
+        else
+          echo "❌ ai_interface health check failed: HTTP $http_code"
+          echo "Response: $body"
+          echo "Log:"
+          cat /tmp/ai_interface.log || true
+          exit 1
+        fi
+        
+    - name: Test llm_server health endpoint
+      run: |
+        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8004/health)
+        http_code=$(echo "$response" | tail -n1)
+        body=$(echo "$response" | head -n-1)
+        
+        if [ "$http_code" -eq 200 ]; then
+          echo "✅ llm_server health check passed: $body"
+        else
+          echo "❌ llm_server health check failed: HTTP $http_code"
+          echo "Response: $body"
+          echo "Log:"
+          cat /tmp/llm_server.log || true
+          exit 1
+        fi
+        
+    - name: Verify all servers are running
+      run: |
+        servers=("ai_head:8001" "ai_emotion:8002" "ai_body:8003" "ai_interface:8010" "llm_server:8004")
+        all_running=true
+        
+        for server_info in "${servers[@]}"; do
+          IFS=':' read -r name port <<< "$server_info"
+          pid_file="/tmp/${name}.pid"
+          
+          if [ -f "$pid_file" ]; then
+            pid=$(cat "$pid_file")
+            if ps -p "$pid" > /dev/null 2>&1; then
+              echo "✅ $name (Port $port) is running (PID: $pid)"
+            else
+              echo "❌ $name (Port $port) is not running"
+              echo "Log:"
+              cat "/tmp/${name}.log" || true
+              all_running=false
+            fi
+          else
+            echo "❌ $name PID file not found"
+            all_running=false
+          fi
+        done
+        
+        if [ "$all_running" = false ]; then
+          exit 1
+        fi
+        
+    - name: Stop all servers
+      if: always()
+      run: |
+        for pid_file in /tmp/ai_head.pid /tmp/ai_emotion.pid /tmp/ai_body.pid /tmp/ai_interface.pid /tmp/llm_server.pid; do
+          if [ -f "$pid_file" ]; then
+            pid=$(cat "$pid_file")
+            kill "$pid" 2>/dev/null || true
+            rm "$pid_file" || true
+          fi
+        done
