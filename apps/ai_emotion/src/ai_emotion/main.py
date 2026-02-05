@@ -162,7 +162,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             confidence = emotion_data.get("confidence", 0.0)
             
             # 산만한 감정 목록
-            distracted_emotions = ["sleepy", "sad", "angry", "tired"]
+            distracted_emotions = ["concentrated", "Distracted", "sleepy"]
             
             # 감정명을 status_message에 직접 표시
             status_message = emotion_data['emotion']
