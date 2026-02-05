@@ -111,89 +111,245 @@ jobs:
         echo $! > /tmp/llm_server.pid
         cd ../..
         
-        # 모든 서버가 시작될 때까지 대기
         echo "Waiting for servers to start..."
-        sleep 10
+        sleep 2  # 초기 시작 대기
+        
+    - name: Check server processes
+      run: |
+        # 각 서버 프로세스가 실행 중인지 확인
+        check_process() {
+          local name=$1
+          local pid_file="/tmp/${name}.pid"
+          
+          if [ ! -f "$pid_file" ]; then
+            echo "❌ $name: PID file not found"
+            return 1
+          fi
+          
+          local pid=$(cat "$pid_file")
+          if ps -p "$pid" > /dev/null 2>&1; then
+            echo "✅ $name: Process running (PID: $pid)"
+            return 0
+          else
+            echo "❌ $name: Process not running (PID: $pid)"
+            echo "Log:"
+            cat "/tmp/${name}.log" || true
+            return 1
+          fi
+        }
+        
+        all_ok=true
+        check_process "ai_head" || all_ok=false
+        check_process "ai_emotion" || all_ok=false
+        check_process "ai_body" || all_ok=false
+        check_process "ai_interface" || all_ok=false
+        check_process "llm_server" || all_ok=false
+        
+        if [ "$all_ok" = false ]; then
+          echo "Some servers failed to start. Exiting."
+          exit 1
+        fi
+        
+    - name: Wait for servers to be ready
+      run: |
+        # 각 서버가 포트에서 리스닝할 때까지 대기 (최대 30초)
+        wait_for_port() {
+          local port=$1
+          local name=$2
+          local max_attempts=30
+          local attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            if lsof -i :$port > /dev/null 2>&1; then
+              echo "✅ $name is listening on port $port"
+              return 0
+            fi
+            attempt=$((attempt + 1))
+            sleep 1
+          done
+          
+          echo "❌ $name failed to start on port $port after ${max_attempts} seconds"
+          return 1
+        }
+        
+        wait_for_port 8001 "ai_head" || (cat /tmp/ai_head.log && exit 1)
+        wait_for_port 8002 "ai_emotion" || (cat /tmp/ai_emotion.log && exit 1)
+        wait_for_port 8003 "ai_body" || (cat /tmp/ai_body.log && exit 1)
+        wait_for_port 8004 "llm_server" || (cat /tmp/llm_server.log && exit 1)
+        wait_for_port 8010 "ai_interface" || (cat /tmp/ai_interface.log && exit 1)
+        
+        echo "All servers are ready!"
+        sleep 2  # 추가 안정화 시간
         
     - name: Test ai_head health endpoint
       run: |
-        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8001/health)
-        http_code=$(echo "$response" | tail -n1)
-        body=$(echo "$response" | head -n-1)
-        
-        if [ "$http_code" -eq 200 ]; then
-          echo "✅ ai_head health check passed: $body"
-        else
-          echo "❌ ai_head health check failed: HTTP $http_code"
+        test_health() {
+          local url=$1
+          local name=$2
+          local max_attempts=5
+          local attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | head -n-1)
+            
+            if [ "$http_code" -eq 200 ]; then
+              echo "✅ $name health check passed: $body"
+              return 0
+            fi
+            
+            attempt=$((attempt + 1))
+            if [ $attempt -lt $max_attempts ]; then
+              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
+              sleep 2
+            fi
+          done
+          
+          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
           echo "Response: $body"
           echo "Log:"
-          cat /tmp/ai_head.log || true
-          exit 1
-        fi
+          cat "/tmp/${name}.log" || true
+          return 1
+        }
+        
+        test_health "http://localhost:8001/health" "ai_head"
         
     - name: Test ai_emotion health endpoint
       run: |
-        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8002/health)
-        http_code=$(echo "$response" | tail -n1)
-        body=$(echo "$response" | head -n-1)
-        
-        if [ "$http_code" -eq 200 ]; then
-          echo "✅ ai_emotion health check passed: $body"
-        else
-          echo "❌ ai_emotion health check failed: HTTP $http_code"
+        test_health() {
+          local url=$1
+          local name=$2
+          local max_attempts=5
+          local attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | head -n-1)
+            
+            if [ "$http_code" -eq 200 ]; then
+              echo "✅ $name health check passed: $body"
+              return 0
+            fi
+            
+            attempt=$((attempt + 1))
+            if [ $attempt -lt $max_attempts ]; then
+              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
+              sleep 2
+            fi
+          done
+          
+          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
           echo "Response: $body"
           echo "Log:"
-          cat /tmp/ai_emotion.log || true
-          exit 1
-        fi
+          cat "/tmp/${name}.log" || true
+          return 1
+        }
+        
+        test_health "http://localhost:8002/health" "ai_emotion"
         
     - name: Test ai_body health endpoint
       run: |
-        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8003/health)
-        http_code=$(echo "$response" | tail -n1)
-        body=$(echo "$response" | head -n-1)
-        
-        if [ "$http_code" -eq 200 ]; then
-          echo "✅ ai_body health check passed: $body"
-        else
-          echo "❌ ai_body health check failed: HTTP $http_code"
+        test_health() {
+          local url=$1
+          local name=$2
+          local max_attempts=5
+          local attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | head -n-1)
+            
+            if [ "$http_code" -eq 200 ]; then
+              echo "✅ $name health check passed: $body"
+              return 0
+            fi
+            
+            attempt=$((attempt + 1))
+            if [ $attempt -lt $max_attempts ]; then
+              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
+              sleep 2
+            fi
+          done
+          
+          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
           echo "Response: $body"
           echo "Log:"
-          cat /tmp/ai_body.log || true
-          exit 1
-        fi
+          cat "/tmp/${name}.log" || true
+          return 1
+        }
+        
+        test_health "http://localhost:8003/health" "ai_body"
         
     - name: Test ai_interface health endpoint
       run: |
-        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8010/health)
-        http_code=$(echo "$response" | tail -n1)
-        body=$(echo "$response" | head -n-1)
-        
-        if [ "$http_code" -eq 200 ]; then
-          echo "✅ ai_interface health check passed: $body"
-        else
-          echo "❌ ai_interface health check failed: HTTP $http_code"
+        test_health() {
+          local url=$1
+          local name=$2
+          local max_attempts=5
+          local attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | head -n-1)
+            
+            if [ "$http_code" -eq 200 ]; then
+              echo "✅ $name health check passed: $body"
+              return 0
+            fi
+            
+            attempt=$((attempt + 1))
+            if [ $attempt -lt $max_attempts ]; then
+              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
+              sleep 2
+            fi
+          done
+          
+          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
           echo "Response: $body"
           echo "Log:"
-          cat /tmp/ai_interface.log || true
-          exit 1
-        fi
+          cat "/tmp/${name}.log" || true
+          return 1
+        }
+        
+        test_health "http://localhost:8010/health" "ai_interface"
         
     - name: Test llm_server health endpoint
       run: |
-        response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" http://localhost:8004/health)
-        http_code=$(echo "$response" | tail -n1)
-        body=$(echo "$response" | head -n-1)
-        
-        if [ "$http_code" -eq 200 ]; then
-          echo "✅ llm_server health check passed: $body"
-        else
-          echo "❌ llm_server health check failed: HTTP $http_code"
+        test_health() {
+          local url=$1
+          local name=$2
+          local max_attempts=5
+          local attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            response=$(curl -s -w "\n%{http_code}" -H "X-API-Key: test-api-key-for-ci" "$url" 2>&1)
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | head -n-1)
+            
+            if [ "$http_code" -eq 200 ]; then
+              echo "✅ $name health check passed: $body"
+              return 0
+            fi
+            
+            attempt=$((attempt + 1))
+            if [ $attempt -lt $max_attempts ]; then
+              echo "⚠️  $name health check attempt $attempt failed (HTTP $http_code), retrying..."
+              sleep 2
+            fi
+          done
+          
+          echo "❌ $name health check failed after $max_attempts attempts: HTTP $http_code"
           echo "Response: $body"
           echo "Log:"
-          cat /tmp/llm_server.log || true
-          exit 1
-        fi
+          cat "/tmp/${name}.log" || true
+          return 1
+        }
+        
+        test_health "http://localhost:8004/health" "llm_server"
         
     - name: Verify all servers are running
       run: |
