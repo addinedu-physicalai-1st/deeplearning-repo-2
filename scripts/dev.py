@@ -111,6 +111,51 @@ def log_relay(name, process, color):
             print(f"{color}[{name}]{RESET} {line.strip()}")
     process.stdout.close()
 
+def remove_jaxlib_if_needed():
+    """macOS x86_64에서 jaxlib 제거 (wheel이 없어서 설치 실패 방지)"""
+    if sys.platform == "darwin":
+        import platform
+        if platform.machine() == "x86_64":
+            try:
+                # 루트 디렉토리에서 jaxlib 제거 시도 (여러 번 시도)
+                for _ in range(3):  # 최대 3번 시도
+                    result = subprocess.run(
+                        ["uv", "pip", "uninstall", "-y", "jaxlib"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False
+                    )
+                    if result.returncode != 0:
+                        break  # 제거할 것이 없으면 종료
+                print("ℹ️  macOS x86_64에서 jaxlib 제거 완료 (wheel이 없어서 제외)")
+            except Exception:
+                pass  # uv pip가 없거나 jaxlib이 없으면 무시
+
+def sync_dependencies():
+    """의존성 동기화 (macOS x86_64에서 jaxlib 제외)"""
+    if sys.platform == "darwin":
+        import platform
+        if platform.machine() == "x86_64":
+            print("\n🔄 의존성 동기화 중... (macOS x86_64: jaxlib 제외)")
+            # jaxlib 제거 (sync 전)
+            remove_jaxlib_if_needed()
+            # uv sync 실행
+            try:
+                subprocess.run(
+                    ["uv", "sync"],
+                    check=True
+                )
+                # jaxlib 제거 (sync 후 - 설치되었을 수 있음)
+                remove_jaxlib_if_needed()
+                print("✅ 의존성 동기화 완료")
+            except subprocess.CalledProcessError:
+                print("⚠️  uv sync 실패, 계속 진행합니다...")
+                # 실패해도 jaxlib은 제거 시도
+                remove_jaxlib_if_needed()
+            except Exception as e:
+                print(f"⚠️  의존성 동기화 중 오류: {e}, 계속 진행합니다...")
+                remove_jaxlib_if_needed()
+
 def main():
     processes = {}
     threads = []
@@ -118,6 +163,9 @@ def main():
     print("=" * 60)
     print("🚀 Focus Monitor 통합 개발 서버 실행기")
     print("=" * 60)
+    
+    # macOS x86_64에서 의존성 동기화 및 jaxlib 제거
+    sync_dependencies()
     
     # 1. 사전 점검
     print("\n🔍 사전 점검 중...")
@@ -155,9 +203,33 @@ def main():
             
             cwd = root_dir / config["path"]
             
-            # macOS x86_64에서 ai_body 실행 시 jaxlib 제외를 위한 환경 변수 설정
+            # macOS x86_64에서 ai_body 실행 시 jaxlib 제거 (wheel이 없어서 설치 실패 방지)
+            if name == "ai_body" and sys.platform == "darwin":
+                import platform
+                if platform.machine() == "x86_64":
+                    # jaxlib 제거 시도 (설치되어 있다면, 여러 번 시도)
+                    for _ in range(3):  # 최대 3번 시도
+                        try:
+                            result = subprocess.run(
+                                ["uv", "pip", "uninstall", "-y", "jaxlib"],
+                                cwd=cwd,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                check=False
+                            )
+                            if result.returncode != 0:
+                                break  # 제거할 것이 없으면 종료
+                        except Exception:
+                            break  # 오류 발생 시 종료
             
             # subprocess.Popen으로 실행
+            env = os.environ.copy()
+            if name == "ai_body" and sys.platform == "darwin":
+                import platform
+                if platform.machine() == "x86_64":
+                    # jaxlib 제외를 위한 환경 변수 설정
+                    env["UV_CONSTRAINT_DEPENDENCIES"] = "jaxlib!=0.5.3"
+            
             p = subprocess.Popen(
                 config["cmd"],
                 cwd=cwd,
@@ -165,7 +237,8 @@ def main():
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                universal_newlines=True
+                universal_newlines=True,
+                env=env
             )
             processes[name] = p
             
