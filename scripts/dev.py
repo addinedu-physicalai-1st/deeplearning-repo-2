@@ -132,13 +132,19 @@ def remove_jaxlib_from_lockfile(lock_path):
             content = new_content
         
         # 2. dependencies 배열에서 jaxlib 항목 제거
-        # 단일 라인: { name = "jaxlib", ... },
-        pattern = r'\s*\{\s*name\s*=\s*"jaxlib"[^}]*\},?\s*\n'
-        content = re.sub(pattern, '', content)
-        
-        # 멀티라인: { name = "jaxlib",\n    ... },
-        pattern = r'\s*\{\s*name\s*=\s*"jaxlib"[^}]*?\},?\s*\n'
-        content = re.sub(pattern, '', content, flags=re.DOTALL)
+        # 중첩된 구조를 처리하기 위해 더 정확한 패턴 사용
+        # { name = "jaxlib", ... } 형태 (source = { ... } 같은 중첩 구조 포함)
+        # 반복 실행하여 모든 jaxlib 항목 제거
+        max_iterations = 20  # 무한 루프 방지
+        for _ in range(max_iterations):
+            # 중첩된 중괄호를 처리하기 위해 더 정확한 패턴
+            # { name = "jaxlib" 부터 }, 까지 매칭 (중첩 구조 포함)
+            # source = { registry = "..." } 같은 중첩 구조를 처리하기 위해 .*? 사용
+            pattern = r'\s*\{\s*name\s*=\s*"jaxlib".*?\},?\s*\n'
+            new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
+            if new_content == content:
+                break
+            content = new_content
         
         # 3. 잘못된 구문 수정: dependencies = [marker = "...", }, 형태 제거
         pattern = r'dependencies = \[\s*marker\s*=\s*"[^"]*"\s*\},\s*\n'
@@ -162,24 +168,24 @@ def remove_jaxlib_from_lockfile(lock_path):
         return False
 
 def remove_jaxlib_if_needed():
-    """macOS x86_64에서 jaxlib 제거 (wheel이 없어서 설치 실패 방지)"""
+    """macOS x86_64에서 jax/jaxlib 제거"""
     if sys.platform == "darwin":
         import platform
         if platform.machine() == "x86_64":
             try:
-                # 루트 디렉토리에서 jaxlib 제거 시도 (여러 번 시도)
-                for _ in range(3):  # 최대 3번 시도
-                    result = subprocess.run(
-                        ["uv", "pip", "uninstall", "-y", "jaxlib"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False
-                    )
-                    if result.returncode != 0:
-                        break  # 제거할 것이 없으면 종료
-                print("ℹ️  macOS x86_64에서 jaxlib 제거 완료 (wheel이 없어서 제외)")
+                # jax와 jaxlib 모두 제거
+                for package in ["jax", "jaxlib"]:
+                    for _ in range(3):
+                        result = subprocess.run(
+                            ["uv", "pip", "uninstall", "-y", package],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            check=False
+                        )
+                        if result.returncode != 0:
+                            break
             except Exception:
-                pass  # uv pip가 없거나 jaxlib이 없으면 무시
+                pass
 
 def sync_dependencies():
     """의존성 동기화 (macOS x86_64에서 jaxlib 제외)"""

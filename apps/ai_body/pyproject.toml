@@ -21,14 +21,17 @@ packages = ["src/ai_body"]
 monitor-shared = { workspace = true }
 
 [tool.uv]
-# macOS x86_64에서 jaxlib 완전 차단 (2중 방어)
+# macOS x86_64에서 jax/jaxlib 완전 제외
+# 이유: wheel이 없어 설치 불가, mediapipe는 선택적 의존성이므로 없어도 작동
 
-# 1차 방어: constraint-dependencies (직접 의존성 차단)
+# 1차: constraint로 해결 단계에서 제외
 constraint-dependencies = [
+    "jax; platform_machine != 'x86_64' or sys_platform != 'darwin'",
     "jaxlib; platform_machine != 'x86_64' or sys_platform != 'darwin'",
 ]
 
-# 2차 방어: override-dependencies (간접 의존성까지 강제 차단)
+# 2차: override로 강제 차단 (백업)
 override-dependencies = [
+    "jax==0.0.0; platform_machine == 'x86_64' and sys_platform == 'darwin'",
     "jaxlib==0.0.0; platform_machine == 'x86_64' and sys_platform == 'darwin'",
 ]
