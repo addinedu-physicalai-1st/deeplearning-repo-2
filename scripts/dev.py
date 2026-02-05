@@ -1,5 +1,4 @@
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -112,197 +111,6 @@ def log_relay(name, process, color):
             print(f"{color}[{name}]{RESET} {line.strip()}")
     process.stdout.close()
 
-def find_balanced_brace_block(text, start_pos):
-    """
-    중첩된 중괄호를 안전하게 처리하여 완전한 블록의 끝 위치를 찾습니다.
-    { name = "..." } 형태의 블록을 찾아 시작과 끝 위치를 반환합니다.
-    
-    Returns:
-        tuple: (start_pos, end_pos) 또는 (None, None) if not found
-    """
-    if start_pos >= len(text) or text[start_pos] != '{':
-        return None, None
-    
-    brace_count = 0
-    i = start_pos
-    
-    while i < len(text):
-        char = text[i]
-        
-        # 문자열 내부인지 확인 (따옴표 처리)
-        if char == '"':
-            i += 1
-            # 문자열 끝까지 건너뛰기
-            while i < len(text) and text[i] != '"':
-                if text[i] == '\\':
-                    i += 1  # 이스케이프 문자 건너뛰기
-                i += 1
-            if i < len(text):
-                i += 1  # 닫는 따옴표 건너뛰기
-            continue
-        
-        if char == '{':
-            brace_count += 1
-        elif char == '}':
-            brace_count -= 1
-            if brace_count == 0:
-                # 완전한 블록을 찾았습니다
-                return start_pos, i + 1
-        
-        i += 1
-    
-    return None, None
-
-def remove_dependency_entry(content, package_name):
-    """
-    dependencies 배열에서 특정 패키지 항목을 안전하게 제거합니다.
-    중첩된 중괄호를 올바르게 처리합니다.
-    """
-    max_iterations = 50  # 무한 루프 방지
-    modified = True
-    
-    for _ in range(max_iterations):
-        if not modified:
-            break
-        
-        modified = False
-        # name = "package_name" 패턴 찾기
-        pattern = rf'name\s*=\s*"{re.escape(package_name)}"'
-        
-        for match in re.finditer(pattern, content):
-            # 매칭된 위치에서 앞으로 거슬러 올라가서 { 찾기
-            start_pos = match.start()
-            
-            # 앞으로 거슬러 올라가서 { 찾기
-            brace_start = start_pos
-            while brace_start > 0:
-                brace_start -= 1
-                if content[brace_start] == '{':
-                    # 중괄호 블록의 끝 찾기
-                    block_start, block_end = find_balanced_brace_block(content, brace_start)
-                    if block_start is not None and block_end is not None:
-                        # 블록 제거 (앞뒤 쉼표와 공백도 함께 처리)
-                        before = content[:block_start]
-                        after = content[block_end:]
-                        
-                        # 앞의 쉼표 제거
-                        before = re.sub(r',\s*$', '', before.rstrip())
-                        # 뒤의 쉼표 제거
-                        after = re.sub(r'^\s*,?\s*', '', after.lstrip())
-                        
-                        content = before + after
-                        modified = True
-                        break
-                elif content[brace_start] in ['\n', '\r'] and brace_start < start_pos - 100:
-                    # 너무 멀리 가면 중단
-                    break
-        
-        # 쉼표 정리 (연속된 쉼표 제거)
-        content = re.sub(r',\s*,', ',', content)
-    
-    return content
-
-def remove_jaxlib_from_lockfile(lock_path):
-    """uv.lock에서 jax/jaxlib 관련 항목 제거 (macOS x86_64에서 wheel이 없어서 설치 실패 방지)"""
-    if not lock_path.exists():
-        return False
-    
-    try:
-        content = lock_path.read_text(encoding='utf-8')
-        original_content = content
-        
-        # 1. jax와 jaxlib 패키지 섹션 전체 제거 (모든 버전)
-        # [[package]] 다음 줄에 name = "jax" 또는 "jaxlib"이 오는 패턴부터 다음 [[package]] 또는 파일 끝까지
-        # 모든 패키지 섹션을 제거하기 위해 반복 실행
-        for package_name in ["jax", "jaxlib"]:
-            while True:
-                pattern = rf'\[\[package\]\]\nname = "{re.escape(package_name)}".*?(?=\n\[\[package\]\]|\Z)'
-                new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
-                if new_content == content:
-                    break
-                content = new_content
-        
-        # 2. dependencies 배열에서 jax와 jaxlib 항목 제거 (안전한 중괄호 매칭 사용)
-        for package_name in ["jax", "jaxlib"]:
-            content = remove_dependency_entry(content, package_name)
-        
-        # 3. 잘못된 구문 수정: dependencies = [marker = "...", }, 형태 제거
-        pattern = r'dependencies = \[\s*marker\s*=\s*"[^"]*"\s*\},\s*\n'
-        content = re.sub(pattern, 'dependencies = [\n', content)
-        
-        # 4. dependencies = [ }, 형태 제거
-        content = re.sub(r'dependencies = \[\s*\},\s*\n', 'dependencies = [\n', content)
-        
-        # 5. 빈 dependencies 배열 정리
-        content = re.sub(r'dependencies = \[\s*\]', 'dependencies = []', content)
-        
-        # 6. 연속된 빈 줄 정리 (최대 2개까지만 허용)
-        content = re.sub(r'\n\n\n+', '\n\n', content)
-        
-        if content != original_content:
-            lock_path.write_text(content, encoding='utf-8')
-            return True
-        return False
-    except Exception as e:
-        print(f"⚠️  uv.lock 수정 중 오류: {e}, 원본 유지")
-        return False
-
-def remove_jaxlib_if_needed():
-    """macOS x86_64에서 jax/jaxlib 제거"""
-    if sys.platform == "darwin":
-        import platform
-        if platform.machine() == "x86_64":
-            try:
-                # jax와 jaxlib 모두 제거
-                for package in ["jax", "jaxlib"]:
-                    for _ in range(3):
-                        result = subprocess.run(
-                            ["uv", "pip", "uninstall", "-y", package],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            check=False
-                        )
-                        if result.returncode != 0:
-                            break
-            except Exception:
-                pass
-
-def sync_dependencies():
-    """의존성 동기화 (macOS x86_64에서 jax/jaxlib 제외)"""
-    if sys.platform == "darwin":
-        import platform
-        if platform.machine() == "x86_64":
-            print("\n🔄 의존성 동기화 중... (macOS x86_64: jax/jaxlib 제외)")
-            
-            # uv.lock에서 jax/jaxlib 제거 (sync 전)
-            lock_path = Path("uv.lock")
-            if remove_jaxlib_from_lockfile(lock_path):
-                print("ℹ️  uv.lock에서 jax/jaxlib 제거 완료")
-            
-            # jax/jaxlib 제거 (sync 전)
-            remove_jaxlib_if_needed()
-            
-            # uv sync 실행 (실패해도 계속 진행)
-            try:
-                result = subprocess.run(
-                    ["uv", "sync"],
-                    check=False,
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode != 0:
-                    print("⚠️  uv sync에 일부 오류가 있었지만 계속 진행합니다...")
-            except Exception as e:
-                print(f"⚠️  uv sync 실행 중 오류: {e}, 계속 진행합니다...")
-            
-            # uv.lock에서 jax/jaxlib 다시 제거 (sync 후에 다시 추가되었을 수 있음)
-            if remove_jaxlib_from_lockfile(lock_path):
-                print("ℹ️  uv.lock에서 jax/jaxlib 재제거 완료")
-            
-            # jax/jaxlib 제거 (sync 후 - 설치되었을 수 있음)
-            remove_jaxlib_if_needed()
-            print("✅ 의존성 동기화 완료")
-
 def main():
     processes = {}
     threads = []
@@ -311,8 +119,31 @@ def main():
     print("🚀 Focus Monitor 통합 개발 서버 실행기")
     print("=" * 60)
     
-    # macOS x86_64에서 의존성 동기화 및 jaxlib 제거
-    sync_dependencies()
+    # 의존성 체크 (uv.lock 수정 없이 단순 확인만)
+    print("\n🔄 의존성 확인 중...")
+    try:
+        result = subprocess.run(
+            ["uv", "sync", "--locked"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode != 0:
+            print("❌ 의존성 동기화 실패")
+            print("\n💡 해결 방법:")
+            print("   1. rm uv.lock")
+            print("   2. uv lock")
+            print("   3. uv sync")
+            print("\n에러 내용:")
+            print(result.stderr)
+            sys.exit(1)
+        print("✅ 의존성 확인 완료")
+    except subprocess.TimeoutExpired:
+        print("⚠️  의존성 동기화 시간 초과 (30초)")
+        sys.exit(1)
+    except Exception as e:
+        print(f"⚠️  의존성 확인 중 오류: {e}")
+        sys.exit(1)
     
     # 1. 사전 점검
     print("\n🔍 사전 점검 중...")
@@ -349,33 +180,6 @@ def main():
             print(f"📦 {name} 시작 중... (Port: {config['port']})")
             
             cwd = root_dir / config["path"]
-            
-            # macOS x86_64에서 ai_body 실행 시 jax/jaxlib 제거 (wheel이 없어서 설치 실패 방지)
-            if name == "ai_body" and sys.platform == "darwin":
-                import platform
-                if platform.machine() == "x86_64":
-                    # uv.lock에서 jax/jaxlib 제거 (uv run 실행 전)
-                    lock_path = root_dir / "uv.lock"
-                    if remove_jaxlib_from_lockfile(lock_path):
-                        print(f"ℹ️  [{name}] uv.lock에서 jax/jaxlib 제거 완료")
-                    
-                    # jax와 jaxlib 제거 시도 (설치되어 있다면, 여러 번 시도)
-                    for package in ["jax", "jaxlib"]:
-                        for _ in range(3):  # 최대 3번 시도
-                            try:
-                                result = subprocess.run(
-                                    ["uv", "pip", "uninstall", "-y", package],
-                                    cwd=cwd,
-                                    stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL,
-                                    check=False
-                                )
-                                if result.returncode != 0:
-                                    break  # 제거할 것이 없으면 종료
-                            except Exception:
-                                break  # 오류 발생 시 종료
-            
-            # subprocess.Popen으로 실행
             env = os.environ.copy()
             
             p = subprocess.Popen(
@@ -434,12 +238,10 @@ def main():
     except KeyboardInterrupt:
         print("\n\n👋 종료 요청을 받았습니다. 모든 서버를 종료합니다...")
     finally:
-        # 3. 모든 프로세스 종료
+        # 모든 프로세스 종료
         for name, p in processes.items():
             if p.poll() is None:
                 print(f"🧹 {name} 종료 중...")
-                # 프로세스 그룹 전체를 종료하려면 os.killpg가 필요할 수 있으나 
-                # 여기서는 단순 terminate로 시작
                 p.terminate()
         
         # 종료 대기
@@ -463,7 +265,6 @@ def stop_servers():
         port = config["port"]
         try:
             if current_os == "Windows":
-                # Windows: netstat을 사용하여 PID 찾기
                 cmd = f"netstat -ano | findstr :{port}"
                 output = subprocess.check_output(cmd, shell=True, text=True)
                 for line in output.strip().split("\n"):
@@ -472,7 +273,6 @@ def stop_servers():
                         print(f"  - {name} (Port {port}, PID {pid}) 종료 중...")
                         subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
             else:
-                # macOS/Linux: lsof 사용
                 try:
                     result = subprocess.check_output(["lsof", "-t", f"-i:{port}"], text=True)
                     pids = result.strip().split("\n")
@@ -483,7 +283,6 @@ def stop_servers():
                 except subprocess.CalledProcessError:
                     pass
         except Exception:
-            # 포트를 사용 중인 프로세스가 없으면 무시
             pass
 
 if __name__ == "__main__":
