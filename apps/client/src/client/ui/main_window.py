@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QEasingCurve
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont
 import pyqtgraph as pg
+from datetime import datetime
 
 from client.core.camera import Camera
 from client.core.network import NetworkClient
@@ -53,6 +54,7 @@ class InferenceThread(QThread):
 class MainPage(QWidget):
     """프로그램 시작 메인 화면"""
     start_requested = pyqtSignal()
+    history_requested = pyqtSignal()
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -61,7 +63,7 @@ class MainPage(QWidget):
         # Welcome Card
         card = QFrame()
         card.setObjectName("Card")
-        card.setFixedSize(500, 400)
+        card.setFixedSize(500, 450)
         card_layout = QVBoxLayout(card)
         card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.setSpacing(20)
@@ -87,6 +89,11 @@ class MainPage(QWidget):
         self.start_btn.setStyleSheet("QPushButton:disabled { background-color: #333; color: #666; }")
         self.start_btn.clicked.connect(self.start_requested.emit)
         card_layout.addWidget(self.start_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.history_btn = QPushButton("VIEW PAST HISTORY")
+        self.history_btn.setObjectName("SecondaryBtn")
+        self.history_btn.clicked.connect(self.history_requested.emit)
+        card_layout.addWidget(self.history_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(card)
 
@@ -224,8 +231,10 @@ class MonitoringPage(QWidget):
 class ReportPage(QWidget):
     """모니터링 종료 후 리포트 화면 (FM-501)"""
     home_requested = pyqtSignal()
-    def __init__(self):
+    def __init__(self, network_client):
         super().__init__()
+        self.network_client = network_client
+        self.current_session_id = None
         self.init_ui()
 
     def init_ui(self):
@@ -234,9 +243,9 @@ class ReportPage(QWidget):
 
         card = QFrame()
         card.setObjectName("Card")
-        card.setFixedSize(600, 550)
+        card.setFixedSize(600, 600)
         card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(20)
+        card_layout.setSpacing(15)
 
         title = QLabel("SESSION REPORT")
         title.setObjectName("Title")
@@ -249,14 +258,23 @@ class ReportPage(QWidget):
         self.add_report_stat(stats_grid, "DURATION", "00:00", 1, 0, "duration")
         card_layout.addLayout(stats_grid)
 
-        # LLM Feedback
+        # LLM Feedback Section
+        feedback_header = QHBoxLayout()
         feedback_label = QLabel("AI FEEDBACK")
         feedback_label.setObjectName("StatLabel")
-        card_layout.addWidget(feedback_label)
+        feedback_header.addWidget(feedback_label)
         
-        self.feedback_text = QLabel("Calculating your focus pattern...")
+        self.llm_btn = QPushButton("LLM 분석 시작")
+        self.llm_btn.setObjectName("SecondaryBtn")
+        self.llm_btn.setFixedWidth(150)
+        self.llm_btn.clicked.connect(self.start_llm_analysis)
+        feedback_header.addWidget(self.llm_btn)
+        card_layout.addLayout(feedback_header)
+        
+        self.feedback_text = QLabel("집중 패턴에 대한 AI 코멘트를 받아보세요.")
         self.feedback_text.setWordWrap(True)
-        self.feedback_text.setStyleSheet("font-size: 16px; color: #E0E0E0; background: #2D2D2D; padding: 15px; border-radius: 8px;")
+        self.feedback_text.setStyleSheet("font-size: 15px; color: #E0E0E0; background: #2D2D2D; padding: 15px; border-radius: 8px; min-height: 100px;")
+        self.feedback_text.setAlignment(Qt.AlignmentFlag.AlignTop)
         card_layout.addWidget(self.feedback_text)
 
         home_btn = QPushButton("BACK TO HOME")
@@ -275,12 +293,16 @@ class ReportPage(QWidget):
         setattr(self, f"report_{key}", val)
 
     def set_report_data(self, data):
+        self.current_session_id = data.get('session_id')
         self.report_ratio.setText(f"{int(data.get('focus_ratio', 0))}%")
         self.report_dist.setText(str(data.get('distraction_count', 0)))
         
-        # Duration calculation
+        # Reset LLM state
+        self.llm_btn.setEnabled(True)
+        self.llm_btn.setText("LLM 분석 시작")
+        self.feedback_text.setText(data.get('llm_comment') or "집중 패턴에 대한 AI 코멘트를 받아보세요.")
+        
         try:
-            from datetime import datetime
             start = datetime.fromisoformat(data['start_time'].replace('Z', ''))
             end = datetime.fromisoformat(data['end_time'].replace('Z', ''))
             duration = end - start
@@ -289,8 +311,106 @@ class ReportPage(QWidget):
             self.report_duration.setText(f"{minutes:02d}:{seconds:02d}")
         except:
             self.report_duration.setText("00:00")
-            
-        self.feedback_text.setText(data.get('llm_comment') or "No feedback available.")
+
+    def start_llm_analysis(self):
+        if not self.current_session_id: return
+        
+        self.llm_btn.setEnabled(False)
+        self.llm_btn.setText("분석 중...")
+        self.feedback_text.setText("AI가 당신의 집중 패턴을 분석하고 있습니다. 잠시만 기다려주세요...")
+        
+        # 별도 스레드 대신 간단하게 처리
+        QTimer.singleShot(100, self._run_llm_request)
+
+    def _run_llm_request(self):
+        result = self.network_client.request_llm_feedback(self.current_session_id)
+        if result and result.get('llm_comment'):
+            self.feedback_text.setText(result['llm_comment'])
+            self.llm_btn.setText("분석 완료")
+        else:
+            self.feedback_text.setText("분석에 실패했습니다. 나중에 다시 시도해주세요.")
+            self.llm_btn.setEnabled(True)
+            self.llm_btn.setText("다시 시도")
+
+from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+
+class HistoryPage(QWidget):
+    """과거 기록 조회 화면 (FM-601)"""
+    home_requested = pyqtSignal()
+    def __init__(self, network_client):
+        super().__init__()
+        self.network_client = network_client
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # Header
+        top_bar = QHBoxLayout()
+        header = QLabel("PAST SESSIONS")
+        header.setObjectName("Title")
+        top_bar.addWidget(header)
+        top_bar.addStretch()
+        
+        home_btn = QPushButton("HOME")
+        home_btn.setObjectName("SecondaryBtn")
+        home_btn.clicked.connect(self.home_requested.emit)
+        top_bar.addWidget(home_btn)
+        layout.addLayout(top_bar)
+
+        # History Table
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Date", "Focus %", "Distractions", "Duration", "ID"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setStyleSheet("""
+            QTableWidget { 
+                background-color: #1E1E1E; 
+                gridline-color: #333; 
+                border-radius: 8px;
+                font-size: 14px;
+            }
+            QHeaderView::section { 
+                background-color: #2D2D2D; 
+                color: #BB86FC; 
+                padding: 10px;
+                font-weight: bold;
+            }
+            QTableWidget::item { padding: 10px; }
+        """)
+        self.table.itemDoubleClicked.connect(self.show_detail)
+        layout.addWidget(self.table)
+
+    def load_data(self):
+        history = self.network_client.get_history()
+        self.table.setRowCount(len(history))
+        for i, session in enumerate(history):
+            # Date
+            start_time = datetime.fromisoformat(session['start_time'].replace('Z', ''))
+            self.table.setItem(i, 0, QTableWidgetItem(start_time.strftime("%Y-%m-%d %H:%M")))
+            # Focus Ratio
+            self.table.setItem(i, 1, QTableWidgetItem(f"{int(session['focus_ratio'])}%"))
+            # Distractions
+            self.table.setItem(i, 2, QTableWidgetItem(str(session['distraction_count'])))
+            # Duration
+            try:
+                end_time = datetime.fromisoformat(session['end_time'].replace('Z', ''))
+                duration = end_time - start_time
+                minutes = int(duration.total_seconds() // 60)
+                seconds = int(duration.total_seconds() % 60)
+                self.table.setItem(i, 3, QTableWidgetItem(f"{minutes:02d}:{seconds:02d}"))
+            except:
+                self.table.setItem(i, 3, QTableWidgetItem("-"))
+            # ID
+            self.table.setItem(i, 4, QTableWidgetItem(session['session_id'][:8] + "..."))
+            self.table.item(i, 4).setData(Qt.ItemDataRole.UserRole, session)
+
+    def show_detail(self, item):
+        row = item.row()
+        session_data = self.table.item(row, 4).data(Qt.ItemDataRole.UserRole)
+        self.parent().parent().show_report_detail(session_data)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -309,16 +429,20 @@ class MainWindow(QMainWindow):
 
         self.main_page = MainPage()
         self.monitoring_page = MonitoringPage()
-        self.report_page = ReportPage()
+        self.report_page = ReportPage(self.network_client)
+        self.history_page = HistoryPage(self.network_client)
 
         self.stack.addWidget(self.main_page)
         self.stack.addWidget(self.monitoring_page)
         self.stack.addWidget(self.report_page)
+        self.stack.addWidget(self.history_page)
 
         # Signals
         self.main_page.start_requested.connect(self.start_session)
+        self.main_page.history_requested.connect(self.show_history)
         self.monitoring_page.stop_requested.connect(self.stop_session)
         self.report_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.history_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
 
         # Timers
         self.preview_timer = QTimer()
@@ -327,7 +451,7 @@ class MainWindow(QMainWindow):
 
         self.conn_timer = QTimer()
         self.conn_timer.timeout.connect(self.check_server_connection)
-        self.conn_timer.start(2000) # Check every 2 seconds
+        self.conn_timer.start(2000)
 
         self.inference_timer = QTimer()
         self.inference_timer.timeout.connect(self.request_inference)
@@ -339,33 +463,62 @@ class MainWindow(QMainWindow):
         self.current_session_id = None
 
     def start_session(self):
-        # Start session in DB
+        # 1. 서버에 세션 시작 요청
         session_data = self.network_client.start_session()
-        if session_data:
-            self.current_session_id = session_data.get("session_id")
-            logger.info(f"Session started: {self.current_session_id}")
         
-        self.is_monitoring = True
-        self.start_time = time.time()
-        self.distraction_count = 0
-        self.history_scores = []
-        self.stack.setCurrentWidget(self.monitoring_page)
-        self.inference_timer.start(3000)
+        if session_data and session_data.get("session_id"):
+            self.current_session_id = session_data.get("session_id")
+            logger.info(f"Session started on server: {self.current_session_id}")
+            
+            # 정상 연결 시에만 모니터링 시작
+            self.is_monitoring = True
+            self.start_time = time.time()
+            self.distraction_count = 0
+            self.history_scores = []
+            self.stack.setCurrentWidget(self.monitoring_page)
+            self.inference_timer.start(3000)
+        else:
+            # 서버 연결 실패 시 시작 차단
+            logger.error("Failed to connect to Operation Server.")
+            QMessageBox.critical(self, "Connection Error", 
+                                "운영 서버와 연결할 수 없습니다.\n서버 상태를 확인하고 다시 시도해주세요.")
+            self.check_server_connection() # 상태 재확인
 
     def stop_session(self):
+        if not self.is_monitoring: return
+        
         self.is_monitoring = False
         self.inference_timer.stop()
         
-        # Stop session and get summary
-        if self.current_session_id:
+        # 1. 서버에 종료 요청
+        summary = None
+        if self.current_session_id and not str(self.current_session_id).startswith("local_"):
             summary = self.network_client.stop_session(self.current_session_id)
-            if summary:
-                self.report_page.set_report_data(summary)
-                self.stack.setCurrentWidget(self.report_page)
-                self.current_session_id = None
-                return
+        
+        # 2. 서버 응답 실패 시 로컬 요약 생성
+        if not summary:
+            elapsed = int(time.time() - self.start_time)
+            summary = {
+                "session_id": self.current_session_id,
+                "focus_ratio": max(0, 100 - (self.distraction_count * 2)),
+                "distraction_count": self.distraction_count,
+                "start_time": datetime.fromtimestamp(self.start_time).isoformat(),
+                "end_time": datetime.now().isoformat(),
+                "llm_comment": "서버 응답이 없습니다. 로컬 통계입니다."
+            }
+        
+        # 3. 확실한 화면 전환
+        self.report_page.set_report_data(summary)
+        self.stack.setCurrentWidget(self.report_page)
+        self.current_session_id = None
 
-        self.stack.setCurrentWidget(self.main_page)
+    def show_history(self):
+        self.history_page.load_data()
+        self.stack.setCurrentWidget(self.history_page)
+
+    def show_report_detail(self, session_data):
+        self.report_page.set_report_data(session_data)
+        self.stack.setCurrentWidget(self.report_page)
 
     def check_server_connection(self):
         if not self.is_monitoring:
@@ -375,7 +528,6 @@ class MainWindow(QMainWindow):
     def update_ui(self):
         frame = self.camera.get_frame()
         if frame is not None:
-            # 씬이 모니터링 화면일 때만 카메라 피드 업데이트
             if self.stack.currentWidget() == self.monitoring_page:
                 frame_mirror = cv2.flip(frame, 1)
                 rgb = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
@@ -384,14 +536,13 @@ class MainWindow(QMainWindow):
                 self.monitoring_page.video_label.setPixmap(QPixmap.fromImage(img).scaled(
                     640, 480, Qt.AspectRatioMode.KeepAspectRatio))
                 
-                # 타이머 업데이트
                 elapsed = int(time.time() - self.start_time)
                 self.monitoring_page.stat_time.setText(f"{elapsed//60:02d}:{elapsed%60:02d}")
             self.current_frame = frame
 
     def request_inference(self):
         if self.is_monitoring and hasattr(self, 'current_frame'):
-            self.sent_frame = self.current_frame.copy() # Capture current frame for warning display
+            self.sent_frame = self.current_frame.copy()
             image_base64 = self.camera.frame_to_base64(self.sent_frame)
             self.thread = InferenceThread(self.network_client, image_base64, self.current_session_id)
             self.thread.result_ready.connect(self.handle_result)
@@ -407,7 +558,6 @@ class MainWindow(QMainWindow):
             m_page.stat_score.setStyleSheet("color: #CF6679;")
             m_page.stat_pose.setText("Away")
             
-            # Show Distraction Image
             if hasattr(self, 'sent_frame'):
                 rgb = cv2.cvtColor(cv2.flip(self.sent_frame, 1), cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb.shape
@@ -416,18 +566,13 @@ class MainWindow(QMainWindow):
                     280, 210, Qt.AspectRatioMode.KeepAspectRatio))
                 m_page.warning_card.show()
             
-            # FM-402: Show Overlay and Play Beep
             m_page.overlay_label.setText(f"ATTENTION!\n{result.status_message}")
             m_page.overlay_label.show()
             QApplication.beep()
-            
-            # Hide overlay after 2 seconds
             QTimer.singleShot(2000, m_page.overlay_label.hide)
-            
         else:
             m_page.stat_score.setStyleSheet("color: #03DAC6;")
             m_page.stat_pose.setText("Centered")
-            # Hide overlay if user returns to focus
             m_page.overlay_label.hide()
 
         score = max(0, 100 - (self.distraction_count * 2))
