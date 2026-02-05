@@ -19,9 +19,69 @@ jobs:
         curl -LsSf https://astral.sh/uv/install.sh | sh
         echo "$HOME/.cargo/bin" >> $GITHUB_PATH
         
+    - name: Remove jax/jaxlib from uv.lock (macOS x86_64)
+      if: runner.os == 'macOS'
+      run: |
+        # macOS x86_64에서 uv.lock에서 jax/jaxlib 제거
+        if [[ "$(uname -m)" == "x86_64" ]] && [ -f "uv.lock" ]; then
+          echo "Removing jax/jaxlib from uv.lock..."
+          # Python 스크립트로 안전하게 제거
+          python3 << 'EOF'
+import re
+from pathlib import Path
+
+lock_path = Path("uv.lock")
+if not lock_path.exists():
+    exit(0)
+
+content = lock_path.read_text(encoding='utf-8')
+original_content = content
+
+# jax와 jaxlib 패키지 섹션 제거
+for package_name in ["jax", "jaxlib"]:
+    while True:
+        pattern = rf'\[\[package\]\]\nname = "{package_name}".*?(?=\n\[\[package\]\]|\Z)'
+        new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
+        if new_content == content:
+            break
+        content = new_content
+
+# dependencies 배열에서 jax와 jaxlib 항목 제거
+for package_name in ["jax", "jaxlib"]:
+    for _ in range(20):  # 최대 20번 반복
+        pattern = rf'\s*{{\s*name\s*=\s*"{package_name}".*?}},?\s*\n'
+        new_content = re.sub(pattern, '', content, flags=re.DOTALL, count=1)
+        if new_content == content:
+            break
+        content = new_content
+
+# 잘못된 구문 정리
+content = re.sub(r'dependencies = \[\s*marker\s*=\s*"[^"]*"\s*\},\s*\n', 'dependencies = [\n', content)
+content = re.sub(r'dependencies = \[\s*\},\s*\n', 'dependencies = [\n', content)
+content = re.sub(r'dependencies = \[\s*\]', 'dependencies = []', content)
+content = re.sub(r'\n\n\n+', '\n\n', content)
+
+if content != original_content:
+    lock_path.write_text(content, encoding='utf-8')
+    print("✅ Removed jax/jaxlib from uv.lock")
+else:
+    print("ℹ️  No jax/jaxlib found in uv.lock")
+EOF
+        fi
+        
     - name: Install dependencies
       run: |
         uv sync --no-dev
+        
+    - name: Remove jax/jaxlib packages (macOS x86_64)
+      if: runner.os == 'macOS'
+      run: |
+        # macOS x86_64에서 설치된 jax/jaxlib 제거
+        if [[ "$(uname -m)" == "x86_64" ]]; then
+          echo "Removing jax/jaxlib packages..."
+          uv pip uninstall -y jax jaxlib 2>/dev/null || true
+          echo "✅ jax/jaxlib removed"
+        fi
         
     - name: Create .env files for all servers
       run: |
