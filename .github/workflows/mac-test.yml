@@ -64,6 +64,9 @@ jobs:
           if ! uv pip show numpy >/dev/null 2>&1; then
             MISSING_PACKAGES+=("numpy")
           fi
+          if ! uv pip show python-dotenv >/dev/null 2>&1; then
+            MISSING_PACKAGES+=("python-dotenv")
+          fi
           
           if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
             echo "⚠️  Missing packages detected: ${MISSING_PACKAGES[*]}, installing..."
@@ -132,9 +135,9 @@ jobs:
             echo "Installing workspace package (shared)..."
             uv pip install -e packages/shared || pip install -e packages/shared || true
             # 필수 패키지 확인
-            python -c "import fastapi, uvicorn, cv2, mediapipe, numpy" 2>/dev/null || {
+            python -c "import fastapi, uvicorn, cv2, mediapipe, numpy, dotenv" 2>/dev/null || {
               echo "⚠️  Some packages missing, installing..."
-              pip install fastapi uvicorn opencv-python mediapipe numpy 2>/dev/null || true
+              pip install fastapi uvicorn opencv-python mediapipe numpy python-dotenv 2>/dev/null || true
             }
             cd apps/ai_body
             python src/ai_body/main.py > /tmp/ai_body.log 2>&1 &
