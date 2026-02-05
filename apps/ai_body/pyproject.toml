@@ -19,3 +19,7 @@ packages = ["src/ai_body"]
 
 [tool.uv.sources]
 monitor-shared = { workspace = true }
+
+[tool.uv.constraints]
+# macOS x86_64에서 jaxlib 0.5.3 제외 (wheel이 없음)
+jaxlib = { version = "!=0.5.3", markers = "sys_platform == 'darwin' and platform_machine == 'x86_64'" }

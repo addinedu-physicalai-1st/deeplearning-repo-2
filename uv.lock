@@ -1278,6 +1278,8 @@ dependencies = [
     { name = "monitor-shared" },
     { name = "opencv-python" },
     { name = "python-dotenv" },
+    { name = "torch", version = "2.1.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
     { name = "ultralytics" },
     { name = "uvicorn" },
 ]
@@ -1288,6 +1290,8 @@ requires-dist = [
     { name = "monitor-shared", editable = "packages/shared" },
     { name = "opencv-python", specifier = ">=4.8.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.4.0" },
+    { name = "torch", marker = "sys_platform == 'darwin'", specifier = "==2.1.2" },
     { name = "ultralytics", specifier = ">=8.4.9" },
     { name = "uvicorn", specifier = ">=0.22.0" },
 ]
