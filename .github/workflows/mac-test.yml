@@ -4,7 +4,7 @@ on: [push]
 
 jobs:
   build:
-    runs-on: macos-13  # macos-13은 Intel(x86) 기반의 마지막 버전입니다.
+    runs-on: macos-12  # macos-13은 Intel(x86) 기반의 마지막 버전입니다.
     
     steps:
     - uses: actions/checkout@v3
