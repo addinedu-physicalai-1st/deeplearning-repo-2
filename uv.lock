@@ -1287,8 +1287,6 @@ version = "0.1.0"
 source = { virtual = "apps/ai_body" }
 dependencies = [
     { name = "fastapi" },
-    { name = "jaxlib", version = "0.6.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and sys_platform == 'darwin') or (python_full_version >= '3.13' and sys_platform == 'darwin')" },
-    { name = "jaxlib", version = "0.7.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' and python_full_version < '3.13' and sys_platform == 'darwin'" },
     { name = "mediapipe" },
     { name = "monitor-shared" },
     { name = "numpy" },
@@ -1300,7 +1298,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.95.0" },
-    { name = "jaxlib", marker = "sys_platform == 'darwin'", specifier = "!=0.5.3" },
     { name = "mediapipe", specifier = "==0.10.14" },
     { name = "monitor-shared", editable = "packages/shared" },
     { name = "numpy", specifier = ">=1.24.0,<2.0" },
