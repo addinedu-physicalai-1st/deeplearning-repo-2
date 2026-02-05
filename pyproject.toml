@@ -17,6 +17,7 @@ members = [
     "apps/operation_server",
     "apps/ai_head",
     "apps/ai_emotion",
+    "apps/ai_body",
     "apps/llm_server",
     "packages/shared",
 ]

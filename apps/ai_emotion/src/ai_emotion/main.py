@@ -153,7 +153,6 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         emotion_data = extract_emotion_from_results(results)
         
         # 감정 기반 집중도 판단
-        # 산만한 감정: sleepy (졸린), sad (슬픔), angry (분노) 등
         is_distracted = False
         status_message = "정상"
         
@@ -162,7 +161,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             confidence = emotion_data.get("confidence", 0.0)
             
             # 산만한 감정 목록
-            distracted_emotions = ["concentrated", "Distracted", "sleepy"]
+            distracted_emotions = [ "Distracted", "sleepy"]
             
             # 감정명을 status_message에 직접 표시
             status_message = emotion_data['emotion']

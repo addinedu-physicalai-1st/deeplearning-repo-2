@@ -90,11 +90,13 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             tasks = [
                 call_ai_server(client, AI_HEAD_URL, request),
                 call_ai_server(client, AI_EMOTION_URL, request),
+                call_ai_server(client, AI_BODY_URL, request),
             ]
             
             results = await asyncio.gather(*tasks)
             head_result = results[0]
             emotion_result = results[1]
+            body_result = results[2]
 
             # Basic Error Handling for the required model
             if "error" in head_result:
@@ -109,12 +111,18 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 logger.warning(f"Emotion server error: {emotion_result.get('error')}")
                 emotion_result = None
 
+            # Error Handling for body server (graceful degradation)
+            if "error" in body_result:
+                logger.warning(f"Body server error: {body_result.get('error')}")
+                body_result = None
+
             # Final Orchestration Logic (Rule-based)
             head_distracted = head_result.get("is_distracted", False)
             emotion_distracted = emotion_result.get("is_distracted", False) if emotion_result else False
+            body_distracted = body_result.get("is_distracted", False) if body_result else False
 
-            # 둘 중 하나라도 True이면 최종적으로 집중하지 않은 것으로 판단
-            is_distracted = head_distracted or emotion_distracted
+            # 셋 중 하나라도 True이면 최종적으로 집중하지 않은 것으로 판단
+            is_distracted = head_distracted or emotion_distracted or body_distracted
 
             # 상태 메시지 구성
             if is_distracted:
@@ -123,6 +131,8 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                     messages.append(head_result.get("status_message", "Head pose issue"))
                 if emotion_distracted and emotion_result:
                     messages.append(emotion_result.get("status_message", "Emotion issue"))
+                if body_distracted and body_result:
+                    messages.append(body_result.get("status_message", "Body posture issue"))
                 status_message = " | ".join(messages) if messages else "Distracted"
             else:
                 status_message = "Focused"
@@ -131,7 +141,8 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 is_distracted=is_distracted,
                 status_message=status_message,
                 head_pose=head_result.get("head_pose"),
-                emotion=emotion_result.get("emotion") if emotion_result else None
+                emotion=emotion_result.get("emotion") if emotion_result else None,
+                body_pose=body_result.get("body_pose") if body_result else None
             )
         except Exception as e:
             logger.exception("Internal Error in AI Interface")

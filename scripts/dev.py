@@ -26,6 +26,11 @@ APPS = {
         "port": 8002,
         "cmd": ["uv", "run", "python", "src/ai_emotion/main.py"]
     },
+    "ai_body": {
+        "path": "apps/ai_body",
+        "port": 8003,
+        "cmd": ["uv", "run", "python", "src/ai_body/main.py"]
+    },
     "llm_server": {
         "path": "apps/llm_server",
         "port": 8004,
