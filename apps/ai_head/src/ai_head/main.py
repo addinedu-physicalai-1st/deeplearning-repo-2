@@ -173,7 +173,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
 
         # Pose Estimation
         target_kpts = keypoints_data[current_idx]
-        pitch, yaw, roll = estimate_pose(target_kpts)
+        pitch, yaw, roll= estimate_pose(target_kpts)
 
         # Thresholds (실용적인 범위로 재조정)
         YAW_LIMIT = 30
