@@ -72,6 +72,9 @@ holistic = mp_holistic.Holistic(
 baseline_distance = None  # 거북목 측정용
 baseline_distance_cm = None  # 앞뒤 이동거리 측정용
 
+# 거북목 판단 임시 기준: posture_percentage가 이 값 미만이면 비집중 (나중에 수치 조정)
+POSTURE_DISTRACTED_THRESHOLD = float(os.getenv("POSTURE_DISTRACTED_THRESHOLD", "70"))
+
 async def get_api_key(header_api_key: str = Depends(api_key_header)):
     if header_api_key and secrets.compare_digest(header_api_key, API_KEY):
         return header_api_key
@@ -174,47 +177,37 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         # 자세 분석
         shoulder_angle, distance_cm, posture_percentage, distance_offset_cm = process_posture(frame)
         
-        # 집중도 판단 로직
+        # 거북목 판단: 비집중으로는 하지 않고, posture_alert만 body_pose에 넣어 GUI에서 노란 경고·경고음
         is_distracted = False
         status_message = "정상"
-        
-        if shoulder_angle is None or distance_cm is None:
-            # 사람이 감지되지 않음
-            is_distracted = True
+
+        if distance_cm is None:
             status_message = "사람을 감지할 수 없습니다"
-        else:
-            # 어깨 기울기 체크 (5도 이상이면 산만)
-            if shoulder_angle > 5.0:
-                is_distracted = True
-                status_message = f"어깨 기울기: {shoulder_angle:.1f}°"
-            
-            # 거북목 체크 (posture_percentage가 70% 미만이면 산만)
-            if posture_percentage is not None and posture_percentage < 70:
-                is_distracted = True
-                if status_message == "정상":
-                    status_message = f"거북목: {posture_percentage:.0f}%"
-                else:
-                    status_message += f" | 거북목: {posture_percentage:.0f}%"
-            
-            # 정상인 경우
-            if not is_distracted:
-                status_message = "정상 자세"
-        
-        # body_pose 데이터 구성
+
+        # body_pose: 현재 프레임 거리 + 정자세 기준값 + 거북목 시 posture_alert
         body_pose = None
-        if shoulder_angle is not None or distance_cm is not None:
+        if distance_cm is not None or baseline_distance is not None or (
+            posture_percentage is not None and posture_percentage < POSTURE_DISTRACTED_THRESHOLD
+        ):
             body_pose = {}
-            if shoulder_angle is not None:
-                body_pose["shoulder_angle"] = float(shoulder_angle)
             if distance_cm is not None:
                 body_pose["distance_cm"] = float(distance_cm)
+            if baseline_distance is not None:
+                body_pose["baseline_distance_cm"] = float(baseline_distance)
+            if shoulder_angle is not None:
+                body_pose["shoulder_angle"] = float(shoulder_angle)
             if posture_percentage is not None:
                 body_pose["posture_percentage"] = float(posture_percentage)
             if distance_offset_cm is not None:
                 body_pose["distance_offset_cm"] = float(distance_offset_cm)
-        
-        logger.info(f"[BODY] Distracted: {is_distracted} | Shoulder: {shoulder_angle:.1f}° | Distance: {distance_cm:.1f}cm | Posture: {posture_percentage:.0f}%" if posture_percentage else f"[BODY] Distracted: {is_distracted} | Shoulder: {shoulder_angle:.1f}° | Distance: {distance_cm:.1f}cm")
-        
+            if posture_percentage is not None and posture_percentage < POSTURE_DISTRACTED_THRESHOLD:
+                body_pose["posture_alert"] = True
+
+        d_str = f"{distance_cm:.1f}" if distance_cm is not None else "None"
+        b_str = f"{baseline_distance:.1f}" if baseline_distance is not None else "None"
+        alert = body_pose.get("posture_alert", False) if body_pose else False
+        logger.info(f"[BODY] distance_cm={d_str} baseline_distance_cm={b_str} posture%={posture_percentage} posture_alert={alert}")
+
         return InferenceResponse(
             is_distracted=is_distracted,
             status_message=status_message,

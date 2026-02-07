@@ -31,6 +31,19 @@ from operation_server import models
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
 
+# Add posture_alert column to focus_logs if missing (existing DB migration)
+try:
+    from sqlalchemy import text
+    if "sqlite" in str(engine.url):
+        with engine.connect() as conn:
+            r = conn.execute(text("PRAGMA table_info(focus_logs)"))
+            cols = [row[1] for row in r]
+        if "posture_alert" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE focus_logs ADD COLUMN posture_alert BOOLEAN DEFAULT 0"))
+except Exception as e:
+    logging.warning(f"Migration posture_alert: {e}")
+
 load_dotenv()
 
 # Logging setup
@@ -166,13 +179,15 @@ async def inference(request: InferenceRequest, api_key: str = Depends(api_key_he
             response.raise_for_status()
             ai_result = response.json()
             
+            body_pose = ai_result.get('body_pose') or {}
             new_log = models.FocusLog(
                 session_id=request.session_id,
                 is_distracted=ai_result.get('is_distracted'),
                 status_message=ai_result.get('status_message'),
                 head_pose_data=ai_result.get('head_pose'),
                 emotion_data=ai_result.get('emotion'),
-                body_pose_data=ai_result.get('body_pose')
+                body_pose_data=ai_result.get('body_pose'),
+                posture_alert=body_pose.get('posture_alert', False),
             )
             db.add(new_log)
             db.commit()

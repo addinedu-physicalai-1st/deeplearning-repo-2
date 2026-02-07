@@ -28,6 +28,7 @@ class FocusLog(Base):
     head_pose_data = Column(JSON, nullable=True)
     emotion_data = Column(JSON, nullable=True)
     body_pose_data = Column(JSON, nullable=True)
+    posture_alert = Column(Boolean, default=False, nullable=True)  # 거북목 경고 (ai_body body_pose.posture_alert)
 
     # Relationship back to session
     session = relationship("MonitoringSession", back_populates="logs")

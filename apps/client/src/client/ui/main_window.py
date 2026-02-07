@@ -3,8 +3,9 @@ import cv2
 import time
 import logging
 import numpy as np
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication)
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                             QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication,
+                             QProgressBar)
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QEasingCurve
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont
 import pyqtgraph as pg
@@ -12,6 +13,7 @@ from datetime import datetime
 
 from client.core.camera import Camera
 from client.core.network import NetworkClient
+from client.core.posture import PostureMonitor
 
 # Logging setup
 logger = logging.getLogger(__name__)
@@ -55,11 +57,13 @@ class MainPage(QWidget):
     """프로그램 시작 메인 화면"""
     start_requested = pyqtSignal()
     history_requested = pyqtSignal()
+    calibration_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         # Welcome Card
         card = QFrame()
         card.setObjectName("Card")
@@ -80,8 +84,13 @@ class MainPage(QWidget):
         # Connection Status
         self.status_label = QLabel("Checking server connection...")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("color: #FFB74D; font-weight: bold;") # Orange for waiting
+        self.status_label.setStyleSheet("color: #FFB74D; font-weight: bold;")  # Orange for waiting
         card_layout.addWidget(self.status_label)
+
+        self.calibration_btn = QPushButton("거리 캘리브레이션")
+        self.calibration_btn.setObjectName("SecondaryBtn")
+        self.calibration_btn.clicked.connect(self.calibration_requested.emit)
+        card_layout.addWidget(self.calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.start_btn = QPushButton("START NEW SESSION")
         self.start_btn.setObjectName("PrimaryBtn")
@@ -107,9 +116,147 @@ class MainPage(QWidget):
             self.status_label.setStyleSheet("color: #CF6679; font-weight: bold;")
             self.start_btn.setEnabled(False)
 
+
+class DistanceCalibrationPage(QWidget):
+    """노트북-사람 거리 캘리브레이션 화면 (posture.py 로직 + ai_body set_baseline)."""
+    done_requested = pyqtSignal()
+
+    def __init__(self, camera: Camera, network_client: NetworkClient):
+        super().__init__()
+        self.camera = camera
+        self.network_client = network_client
+        self.monitor = PostureMonitor()
+        self.current_distance_cm = None
+        self.current_frame = None
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._update_frame)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QHBoxLayout(self)
+
+        # Video + labels left
+        left = QVBoxLayout()
+        self.video_label = QLabel("Camera")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_label.setStyleSheet("background-color: black; border: 2px solid #333;")
+        self.video_label.setFixedSize(640, 480)
+        left.addWidget(self.video_label)
+
+        self.status_label = QLabel("상태: 대기중")
+        self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFB74D;")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left.addWidget(self.status_label)
+        layout.addLayout(left)
+
+        # Control panel right
+        panel = QFrame()
+        panel.setObjectName("Card")
+        panel.setStyleSheet("QFrame#Card { background-color: #1E1E1E; border-radius: 12px; border: 1px solid #333; }")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setSpacing(12)
+
+        title = QLabel("거리 캘리브레이션")
+        title.setObjectName("Title")
+        title.setStyleSheet("font-size: 22px; color: #BB86FC;")
+        panel_layout.addWidget(title)
+
+        self.shoulder_label = QLabel("어깨 각도: --°")
+        self.shoulder_label.setStyleSheet("font-size: 16px; color: #9E9E9E;")
+        panel_layout.addWidget(self.shoulder_label)
+
+        self.distance_label = QLabel("거리: -- cm")
+        self.distance_label.setStyleSheet("font-size: 16px; color: #03DAC6;")
+        panel_layout.addWidget(self.distance_label)
+
+        self.posture_label = QLabel("거북목: -- %")
+        self.posture_label.setStyleSheet("font-size: 16px; color: #64B5F6;")
+        panel_layout.addWidget(self.posture_label)
+
+        self.posture_progress = QProgressBar()
+        self.posture_progress.setMinimum(0)
+        self.posture_progress.setMaximum(100)
+        self.posture_progress.setValue(0)
+        self.posture_progress.setStyleSheet("""
+            QProgressBar { border: 2px solid #64B5F6; border-radius: 5px; background-color: #333; }
+            QProgressBar::chunk { background-color: #64B5F6; }
+        """)
+        panel_layout.addWidget(self.posture_progress)
+
+        panel_layout.addStretch(1)
+
+        self.set_baseline_btn = QPushButton("정자세 설정")
+        self.set_baseline_btn.setObjectName("PrimaryBtn")
+        self.set_baseline_btn.clicked.connect(self._on_set_baseline)
+        panel_layout.addWidget(self.set_baseline_btn)
+
+        self.done_btn = QPushButton("완료")
+        self.done_btn.setObjectName("SecondaryBtn")
+        self.done_btn.clicked.connect(self.done_requested.emit)
+        panel_layout.addWidget(self.done_btn)
+
+        layout.addWidget(panel)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.timer.start(33)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.timer.stop()
+
+    def _update_frame(self):
+        frame = self.camera.get_frame()
+        if frame is None:
+            return
+        self.current_frame = frame
+        image_rgb, shoulder_angle, distance_cm, posture_percentage, distance_offset_cm = self.monitor.process_frame(frame)
+        self.current_distance_cm = distance_cm
+
+        h, w, ch = image_rgb.shape
+        bytes_per_line = ch * w
+        qt_image = QImage(image_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        self.video_label.setPixmap(QPixmap.fromImage(qt_image).scaled(
+            640, 480, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+        if shoulder_angle is not None:
+            self.shoulder_label.setText(f"어깨 각도: {shoulder_angle:.1f}°")
+        else:
+            self.shoulder_label.setText("어깨 각도: --°")
+
+        if distance_cm is not None:
+            self.distance_label.setText(f"거리: {distance_cm:.1f} cm")
+        else:
+            self.distance_label.setText("거리: -- cm")
+
+        if posture_percentage is not None:
+            self.posture_progress.setValue(int(posture_percentage))
+            self.posture_label.setText(f"거북목: {int(posture_percentage)} %")
+        else:
+            self.posture_progress.setValue(0)
+            self.posture_label.setText("거북목: -- %")
+
+    def _on_set_baseline(self):
+        if self.current_distance_cm is None or self.current_frame is None:
+            self.status_label.setText("거리를 감지할 수 없습니다.")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #FF9800;")
+            return
+        self.monitor.set_baseline_from_distance(self.current_distance_cm)
+        image_base64 = self.camera.frame_to_base64(self.current_frame)
+        ok = self.network_client.set_baseline(image_base64)
+        if ok:
+            self.status_label.setText("정자세가 설정되었습니다.")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #03DAC6;")
+        else:
+            self.status_label.setText("ai_body 서버 연결 실패. 서버를 확인하세요.")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #CF6679;")
+
+
 class MonitoringPage(QWidget):
     """실시간 모니터링 화면"""
     stop_requested = pyqtSignal()
+    set_baseline_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.init_ui()
@@ -123,7 +270,12 @@ class MonitoringPage(QWidget):
         header.setObjectName("Header")
         top_bar.addWidget(header)
         top_bar.addStretch()
-        
+
+        self.set_baseline_btn = QPushButton("정자세 다시 설정")
+        self.set_baseline_btn.setObjectName("SecondaryBtn")
+        self.set_baseline_btn.clicked.connect(self.set_baseline_requested.emit)
+        top_bar.addWidget(self.set_baseline_btn)
+
         stop_btn = QPushButton("STOP SESSION")
         stop_btn.setObjectName("StopBtn")
         stop_btn.clicked.connect(self.stop_requested.emit)
@@ -148,7 +300,13 @@ class MonitoringPage(QWidget):
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_container_layout.addWidget(self.video_label, 0, 0)
         
-        # Overlay Notification Label
+        # 알림 컨테이너: 비집중(위) + 거북목(아래) 세로 배치로 동시 표시 시 겹치지 않음
+        self.alert_container = QWidget()
+        alert_layout = QVBoxLayout(self.alert_container)
+        alert_layout.setContentsMargins(0, 0, 0, 0)
+        alert_layout.setSpacing(10)
+
+        # Overlay Notification Label (red, 비집중)
         self.overlay_label = QLabel("DISTRACTION DETECTED!")
         self.overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.overlay_label.setStyleSheet("""
@@ -161,7 +319,24 @@ class MonitoringPage(QWidget):
         """)
         self.overlay_label.setFixedSize(400, 100)
         self.overlay_label.hide()
-        self.video_container_layout.addWidget(self.overlay_label, 0, 0, Qt.AlignmentFlag.AlignCenter)
+        alert_layout.addWidget(self.overlay_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # 거북목 경고 (노란색, 2초간 표시 + 경고음, 비집중으로 카운트 안 함)
+        self.posture_alert_label = QLabel("거북목")
+        self.posture_alert_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.posture_alert_label.setStyleSheet("""
+            background-color: rgba(255, 193, 7, 220);
+            color: #000;
+            font-size: 28px;
+            font-weight: bold;
+            border-radius: 10px;
+            padding: 24px;
+        """)
+        self.posture_alert_label.setFixedSize(320, 90)
+        self.posture_alert_label.hide()
+        alert_layout.addWidget(self.posture_alert_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+        self.video_container_layout.addWidget(self.alert_container, 0, 0, Qt.AlignmentFlag.AlignCenter)
         
         video_vbox.addWidget(self.video_container)
         content_layout.addWidget(video_card)
@@ -457,12 +632,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
 
         self.main_page = MainPage()
+        self.calibration_page = DistanceCalibrationPage(self.camera, self.network_client)
         self.monitoring_page = MonitoringPage()
         self.report_page = ReportPage()
         self.analysis_page = LlmAnalysisPage(self.network_client)
         self.history_page = HistoryPage(self.network_client)
 
         self.stack.addWidget(self.main_page)
+        self.stack.addWidget(self.calibration_page)
         self.stack.addWidget(self.monitoring_page)
         self.stack.addWidget(self.report_page)
         self.stack.addWidget(self.analysis_page)
@@ -471,7 +648,10 @@ class MainWindow(QMainWindow):
         # Signals
         self.main_page.start_requested.connect(self.start_session)
         self.main_page.history_requested.connect(self.show_history)
+        self.main_page.calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.calibration_page))
+        self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.monitoring_page.stop_requested.connect(self.stop_session)
+        self.monitoring_page.set_baseline_requested.connect(self._on_set_baseline_from_monitoring)
         self.report_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.report_page.llm_analysis_requested.connect(self.show_analysis)
         self.analysis_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
@@ -546,6 +726,18 @@ class MainWindow(QMainWindow):
         self.history_page.load_data()
         self.stack.setCurrentWidget(self.history_page)
 
+    def _on_set_baseline_from_monitoring(self):
+        """공부 중 정자세 다시 설정: 현재 프레임으로 ai_body set_baseline 호출."""
+        if not hasattr(self, "current_frame") or self.current_frame is None:
+            QMessageBox.warning(self, "정자세 설정", "카메라 프레임을 읽을 수 없습니다.")
+            return
+        image_base64 = self.camera.frame_to_base64(self.current_frame)
+        ok = self.network_client.set_baseline(image_base64)
+        if ok:
+            QMessageBox.information(self, "정자세 설정", "정자세가 다시 설정되었습니다.")
+        else:
+            QMessageBox.warning(self, "정자세 설정", "ai_body 서버 연결에 실패했습니다.\n서버가 실행 중인지 확인하세요.")
+
     def show_report_detail(self, session_data):
         self.report_page.set_report_data(session_data)
         self.report_page.set_llm_button_visible(False) # 과거 기록 조회 시에는 버튼 숨김
@@ -605,6 +797,13 @@ class MainWindow(QMainWindow):
             m_page.stat_score.setStyleSheet("color: #03DAC6;")
             m_page.stat_pose.setText("Centered")
             m_page.overlay_label.hide()
+
+        # 거북목 경고: 비집중으로 카운트하지 않고, 노란 경고 2초 + 경고음만
+        if result.body_pose and result.body_pose.get("posture_alert"):
+            m_page.posture_alert_label.setText("거북목")
+            m_page.posture_alert_label.show()
+            QApplication.beep()
+            QTimer.singleShot(2000, m_page.posture_alert_label.hide)
 
         score = max(0, 100 - (self.distraction_count * 2))
         m_page.stat_score.setText(f"{int(score)}%")

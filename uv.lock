@@ -1387,6 +1387,7 @@ name = "monitor-client"
 version = "0.1.0"
 source = { editable = "apps/client" }
 dependencies = [
+    { name = "mediapipe" },
     { name = "monitor-shared" },
     { name = "opencv-python" },
     { name = "pyqt6" },
@@ -1397,6 +1398,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "mediapipe", specifier = ">=0.10.0" },
     { name = "monitor-shared", editable = "packages/shared" },
     { name = "opencv-python", specifier = ">=4.7.0" },
     { name = "pyqt6", specifier = ">=6.4.0" },

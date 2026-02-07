@@ -8,10 +8,11 @@ from shared.schemas import InferenceRequest, InferenceResponse
 logger = logging.getLogger(__name__)
 
 class NetworkClient:
-    def __init__(self, operation_url=None, api_key=None):
+    def __init__(self, operation_url=None, api_key=None, ai_body_url=None):
         self.operation_url = operation_url or os.getenv("OPERATION_SERVER_URL", "http://localhost:8000/inference")
         self.api_key = api_key or os.getenv("API_KEY")
-        
+        self.ai_body_url = (ai_body_url or os.getenv("AI_BODY_URL", "http://localhost:8003")).rstrip("/")
+
         if not self.api_key:
             logger.warning("API_KEY is not set. Requests will likely fail.")
 
@@ -85,3 +86,16 @@ class NetworkClient:
         except Exception as e:
             logger.error(f"Error requesting LLM feedback: {e}")
             return None
+
+    def set_baseline(self, image_base64: str) -> bool:
+        """POST current frame to ai_body /set_baseline. Returns True on success."""
+        url = f"{self.ai_body_url}/set_baseline"
+        payload = InferenceRequest(image_base64=image_base64, session_id=None)
+        headers = {"X-API-Key": self.api_key, "Content-Type": "application/json"}
+        try:
+            response = requests.post(url, json=payload.dict(), headers=headers, timeout=5, verify=True)
+            response.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Error sending set_baseline to ai_body: {e}")
+            return False
