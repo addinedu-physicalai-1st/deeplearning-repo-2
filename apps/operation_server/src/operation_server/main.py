@@ -15,7 +15,7 @@ import json
 from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Security, Depends, Response, Request
 from fastapi.security.api_key import APIKeyHeader
-from shared.schemas import InferenceRequest, InferenceResponse, SessionStartResponse, SessionSummary, FeedbackRequest, FeedbackResponse
+from shared.schemas import InferenceRequest, InferenceResponse, SessionStartResponse, SessionSummary, FeedbackRequest, FeedbackResponse, SessionLogsResponse, FocusLogItem
 from typing import List
 from dotenv import load_dotenv
 from starlette.status import HTTP_403_FORBIDDEN
@@ -129,6 +129,28 @@ async def stop_session(session_id: str, api_key: str = Depends(api_key_header), 
         focus_ratio=session.focus_ratio,
         distraction_count=session.distraction_count,
         llm_comment=session.llm_comment
+    )
+
+@app.get("/sessions/{session_id}/logs", response_model=SessionLogsResponse)
+async def get_session_logs(session_id: str, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+    """세션의 모든 로그 데이터를 반환"""
+    session = db.query(models.MonitoringSession).filter(models.MonitoringSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    logs = db.query(models.FocusLog).filter(models.FocusLog.session_id == session_id).order_by(models.FocusLog.timestamp).all()
+    
+    log_items = [
+        FocusLogItem(
+            timestamp=log.timestamp,
+            is_distracted=log.is_distracted,
+            status_message=log.status_message
+        ) for log in logs
+    ]
+    
+    return SessionLogsResponse(
+        session_id=session_id,
+        logs=log_items
     )
 
 @app.post("/sessions/{session_id}/feedback")

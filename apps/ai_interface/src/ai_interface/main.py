@@ -11,6 +11,7 @@ from starlette.status import HTTP_403_FORBIDDEN
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
+import math
 
 load_dotenv()
 
@@ -91,12 +92,14 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 call_ai_server(client, AI_HEAD_URL, request),
                 call_ai_server(client, AI_EMOTION_URL, request),
                 call_ai_server(client, AI_BODY_URL, request),
+                # call_ai_server(client, AI_GAZE_URL, request),
             ]
             
             results = await asyncio.gather(*tasks)
             head_result = results[0]
             emotion_result = results[1]
             body_result = results[2]
+            # gaze_result = results[3]
 
             # Basic Error Handling for the required model
             if "error" in head_result:
@@ -116,6 +119,11 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 logger.warning(f"Body server error: {body_result.get('error')}")
                 body_result = None
 
+            # Error Handling for gaze server (graceful degradation)
+            # if "error" in gaze_result:
+            #     logger.warning(f"Gaze server error: {gaze_result.get('error')}")
+            #     gaze_result = None
+
             # Final Orchestration Logic (Rule-based)
             head_distracted = head_result.get("is_distracted", False)
             emotion_distracted = emotion_result.get("is_distracted", False) if emotion_result else False
@@ -123,6 +131,73 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
 
             # 셋 중 하나라도 True이면 최종적으로 집중하지 않은 것으로 판단
             is_distracted = head_distracted or emotion_distracted or body_distracted
+
+    ###################################################################################################
+            # # Orchestration Logic
+            # EMOTION_WEIGHT = 0.3
+            # POSITION_WEIGHT = 0.3
+            # HEAD_WEIGHT = 0.4
+
+            # MONITOR_DISTANCE_CM = 30
+            # MONITOR_WIDTH_CM = 50
+            # MONITOR_HEIGHT_CM = 30
+            # MONITOR_WIDTH_PX = 1920
+            # MONITOR_HEIGHT_PX = 1080
+
+            # emotion_cls = emotion_result.get("emotion", {}).get("emotion", "") if emotion_result else 0
+            # emotion_confidence = emotion_result.get("emotion", {}).get("confidence", 0.0) if emotion_result else 0.0
+            # if emotion_cls == "Concentrated":
+            #     emotion_score = 0.5 + emotion_confidence * 0.5
+            # elif emotion_cls == "Distracted":
+            #     emotion_score = (1 - emotion_confidence) * 0.5
+            # elif emotion_cls == "Sleepy":
+            #     emotion_score = 0.0
+            # else:
+            #     pass
+
+            # position_distance = body_result.get("body_pose", {}).get("distance_cm", 0.0) if body_result else 0.0
+            # position_score = max(0, (50 - position_distance) / 50)
+
+
+            # yaw_rad = math.radians(head_result.get("head_pose", {}).get("yaw", 0.0)) if head_result else 0.0
+            # pitch_rad = math.radians(head_result.get("head_pose", {}).get("pitch", 0.0)) if head_result else 0.0
+
+            # gaze_cordinate_x = gaze_result.get("gaze_cordinate", {}).get("x", 0.0) if gaze_result else 0.0
+            # gaze_cordinate_y = gaze_result.get("gaze_cordinate", {}).get("y", 0.0) if gaze_result else 0.0
+            # head_direction_x = math.sin(yaw_rad) * math.cos(pitch_rad)
+            # head_direction_y = -math.sin(pitch_rad)
+            # head_direction_z = math.cos(yaw_rad) * math.cos(pitch_rad)
+
+            # if gaze_cordinate_x is not None:
+            #     if head_direction_z > 0:
+            #         # head 방향 벡터를 30cm 거리의 모니터 평면에 투영 (cm 단위)
+            #         t = MONITOR_DISTANCE_CM / head_direction_z
+            #         head_point_x_cm = head_direction_x * t
+            #         head_point_y_cm = head_direction_y * t
+                    
+            #         # cm를 픽셀로 변환 (모니터 중심을 원점으로 가정)
+            #         head_point_x_px = (head_point_x_cm / MONITOR_WIDTH_CM) * MONITOR_WIDTH_PX + (MONITOR_WIDTH_PX / 2)
+            #         head_point_y_px = (head_point_y_cm / MONITOR_HEIGHT_CM) * MONITOR_HEIGHT_PX + (MONITOR_HEIGHT_PX / 2)
+            #     else:
+            #         head_point_x_px = MONITOR_WIDTH_PX / 2
+            #         head_point_y_px = MONITOR_HEIGHT_PX / 2
+
+            #     # gaze_coordinate와 head가 가리키는 좌표 사이의 거리 계산 (픽셀 단위)
+            #     dx = gaze_cordinate_x - head_point_x_px
+            #     dy = gaze_cordinate_y - head_point_y_px
+            #     head_gaze_score = 1 - min(1, math.sqrt(dx * dx + dy * dy) / (MONITOR_HEIGHT_PX / 2))
+            # else:
+            #     if head_result.get("is_distracted", False):
+            #         head_gaze_score = 0.0
+            #     else:
+            #         head_gaze_score = 1.0
+
+            # is_monitor = 1 if gaze_cordinate_x else 0
+            # is_seat = 1 if emotion_result else 0
+
+            # concentration_score = is_monitor * is_seat * (EMOTION_WEIGHT * emotion_score + POSITION_WEIGHT * position_score + HEAD_WEIGHT * head_gaze_score)
+
+    ###################################################################################################
 
             # 상태 메시지 구성
             if is_distracted:

@@ -76,6 +76,18 @@ class NetworkClient:
             logger.error(f"Error fetching history: {e}")
             return []
 
+    def get_session_logs(self, session_id: str) -> dict:
+        """세션의 로그 데이터를 가져옴"""
+        url = self.operation_url.replace("/inference", f"/sessions/{session_id}/logs")
+        headers = {"X-API-Key": self.api_key}
+        try:
+            response = requests.get(url, headers=headers, timeout=10, verify=True)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching session logs: {e}")
+            return None
+
     def request_llm_feedback(self, session_id: str) -> dict:
         url = self.operation_url.replace("/inference", f"/sessions/{session_id}/feedback")
         headers = {"X-API-Key": self.api_key}

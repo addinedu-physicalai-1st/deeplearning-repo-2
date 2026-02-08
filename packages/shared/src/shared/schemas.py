@@ -51,3 +51,12 @@ class FeedbackResponse(BaseModel):
                     feedback="세션 데이터를 다시 확인해주세요.",
                 )
         return handler(value)
+
+class FocusLogItem(BaseModel):
+    timestamp: datetime
+    is_distracted: bool
+    status_message: Optional[str] = None
+
+class SessionLogsResponse(BaseModel):
+    session_id: Union[str, UUID]
+    logs: List[FocusLogItem]
