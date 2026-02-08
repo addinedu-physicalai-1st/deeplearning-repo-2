@@ -690,18 +690,20 @@ class ReportPage(QWidget):
         if session_start_dt is not None and session_end_dt is not None:
             duration_seconds = (session_end_dt - session_start_dt).total_seconds()
             self.line1_plot.setXRange(0, duration_seconds)
-            # 서버는 UTC로 저장하므로 로컬 시각으로 변환 후 X축 눈금 표시
-            def _utc_to_local(dt):
+            # 서버 시각(UTC 또는 KST 등)을 로컬 시각으로 변환 후 X축 눈금 표시
+            def _to_local(dt):
+                if dt.tzinfo is not None:
+                    return dt.astimezone()
                 return dt.replace(tzinfo=timezone.utc).astimezone()
-            start_local = _utc_to_local(session_start_dt)
-            end_local = _utc_to_local(session_end_dt)
+            start_local = _to_local(session_start_dt)
+            end_local = _to_local(session_end_dt)
             d = duration_seconds
             tick_positions = [0, d / 4, d / 2, 3 * d / 4, d]
             tick_labels = [
                 start_local.strftime("%H:%M"),
-                _utc_to_local(session_start_dt + timedelta(seconds=d / 4)).strftime("%H:%M"),
-                _utc_to_local(session_start_dt + timedelta(seconds=d / 2)).strftime("%H:%M"),
-                _utc_to_local(session_start_dt + timedelta(seconds=3 * d / 4)).strftime("%H:%M"),
+                _to_local(session_start_dt + timedelta(seconds=d / 4)).strftime("%H:%M"),
+                _to_local(session_start_dt + timedelta(seconds=d / 2)).strftime("%H:%M"),
+                _to_local(session_start_dt + timedelta(seconds=3 * d / 4)).strftime("%H:%M"),
                 end_local.strftime("%H:%M"),
             ]
             ticks = [(pos, label) for pos, label in zip(tick_positions, tick_labels)]
@@ -875,25 +877,46 @@ class HistoryPage(QWidget):
         self.table.itemDoubleClicked.connect(self.show_detail)
         layout.addWidget(self.table)
 
+    def _parse_dt_local(self, dt_str):
+        """Parse server datetime (UTC or timezone-aware) and return naive datetime in user's local time for display."""
+        if not dt_str:
+            return None
+        s = dt_str.replace('Z', '+00:00')
+        try:
+            dt = datetime.fromisoformat(s)
+        except ValueError:
+            return None
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        else:
+            dt = dt.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
+        return dt
+
     def load_data(self):
         history = self.network_client.get_history()
         self.table.setRowCount(len(history))
         for i, session in enumerate(history):
-            # Date
-            start_time = datetime.fromisoformat(session['start_time'].replace('Z', ''))
-            self.table.setItem(i, 0, QTableWidgetItem(start_time.strftime("%Y-%m-%d %H:%M")))
+            # Date (로컬 시각으로 표시)
+            start_time = self._parse_dt_local(session.get('start_time'))
+            if start_time is not None:
+                self.table.setItem(i, 0, QTableWidgetItem(start_time.strftime("%Y-%m-%d %H:%M")))
+            else:
+                self.table.setItem(i, 0, QTableWidgetItem("-"))
             # Focus Ratio
             self.table.setItem(i, 1, QTableWidgetItem(f"{int(session['focus_ratio'])}%"))
             # Distractions
             self.table.setItem(i, 2, QTableWidgetItem(str(session['distraction_count'])))
             # Duration
             try:
-                end_time = datetime.fromisoformat(session['end_time'].replace('Z', ''))
-                duration = end_time - start_time
-                minutes = int(duration.total_seconds() // 60)
-                seconds = int(duration.total_seconds() % 60)
-                self.table.setItem(i, 3, QTableWidgetItem(f"{minutes:02d}:{seconds:02d}"))
-            except:
+                end_time = self._parse_dt_local(session.get('end_time'))
+                if start_time is not None and end_time is not None:
+                    duration = end_time - start_time
+                    minutes = int(duration.total_seconds() // 60)
+                    seconds = int(duration.total_seconds() % 60)
+                    self.table.setItem(i, 3, QTableWidgetItem(f"{minutes:02d}:{seconds:02d}"))
+                else:
+                    self.table.setItem(i, 3, QTableWidgetItem("-"))
+            except Exception:
                 self.table.setItem(i, 3, QTableWidgetItem("-"))
             # ID
             self.table.setItem(i, 4, QTableWidgetItem(session['session_id'][:8] + "..."))

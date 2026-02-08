@@ -23,6 +23,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # Change to absolute imports within the package
 from operation_server.database import engine, get_db
@@ -91,11 +92,12 @@ async def start_session(api_key: str = Depends(api_key_header), db: Session = De
 @app.get("/sessions", response_model=List[SessionSummary])
 async def get_sessions(api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
     sessions = db.query(models.MonitoringSession).filter(models.MonitoringSession.end_time != None).order_by(models.MonitoringSession.start_time.desc()).all()
+    kst = ZoneInfo("Asia/Seoul")
     return [
         SessionSummary(
             session_id=s.id,
-            start_time=s.start_time,
-            end_time=s.end_time,
+            start_time=s.start_time.replace(tzinfo=kst) if s.start_time else None,
+            end_time=s.end_time.replace(tzinfo=kst) if s.end_time else None,
             focus_ratio=s.focus_ratio,
             distraction_count=s.distraction_count,
             llm_comment=s.llm_comment
@@ -108,7 +110,7 @@ async def stop_session(session_id: str, api_key: str = Depends(api_key_header), 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    session.end_time = datetime.utcnow()
+    session.end_time = datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
     
     # Calculate stats from logs
     logs = db.query(models.FocusLog).filter(models.FocusLog.session_id == session_id).all()
@@ -122,10 +124,11 @@ async def stop_session(session_id: str, api_key: str = Depends(api_key_header), 
     db.commit()
     db.refresh(session)
     
+    kst = ZoneInfo("Asia/Seoul")
     return SessionSummary(
         session_id=session.id,
-        start_time=session.start_time,
-        end_time=session.end_time,
+        start_time=session.start_time.replace(tzinfo=kst) if session.start_time else None,
+        end_time=session.end_time.replace(tzinfo=kst) if session.end_time else None,
         focus_ratio=session.focus_ratio,
         distraction_count=session.distraction_count,
         llm_comment=session.llm_comment
