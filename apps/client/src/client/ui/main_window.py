@@ -5,11 +5,11 @@ import logging
 import numpy as np
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication,
-                             QProgressBar)
-from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QEasingCurve
+                             QProgressBar, QDateEdit, QScrollArea)
+from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QEasingCurve, QDate
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont
 import pyqtgraph as pg
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 
 from client.core.camera import Camera
 from client.core.network import NetworkClient
@@ -515,6 +515,31 @@ class ReportPage(QWidget):
         graphs_layout.addLayout(right_column, stretch=2)
         main_layout.addLayout(graphs_layout, stretch=1)
 
+        # LLM 피드백 카드 (저장된 피드백 표시)
+        feedback_card = QFrame()
+        feedback_card.setObjectName("Card")
+        feedback_card_vbox = QVBoxLayout(feedback_card)
+        feedback_card_vbox.setContentsMargins(15, 15, 15, 15)
+        feedback_title = QLabel("LLM 피드백")
+        feedback_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #BB86FC; margin-bottom: 10px;")
+        feedback_card_vbox.addWidget(feedback_title)
+        self.report_llm_feedback_label = QLabel("저장된 LLM 피드백이 없습니다.")
+        self.report_llm_feedback_label.setWordWrap(True)
+        self.report_llm_feedback_label.setStyleSheet("""
+            font-size: 14px; color: #E0E0E0; background: #2D2D2D; padding: 15px; border-radius: 8px; line-height: 1.5;
+        """)
+        self.report_llm_feedback_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.report_llm_feedback_label.setMinimumHeight(80)
+        feedback_scroll = QScrollArea()
+        feedback_scroll.setWidgetResizable(True)
+        feedback_scroll.setWidget(self.report_llm_feedback_label)
+        feedback_scroll.setMinimumHeight(130)
+        feedback_scroll.setMaximumHeight(220)
+        feedback_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        feedback_scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        feedback_card_vbox.addWidget(feedback_scroll)
+        main_layout.addWidget(feedback_card)
+
     def set_llm_button_visible(self, visible: bool):
         self.llm_btn.setVisible(visible)
 
@@ -539,6 +564,12 @@ class ReportPage(QWidget):
         self.report_avg_focus.setText("--")
         self._session_start_dt = None
         self._session_end_dt = None
+
+        llm_comment = (data.get('llm_comment') or "").strip()
+        if llm_comment:
+            self.report_llm_feedback_label.setText(llm_comment)
+        else:
+            self.report_llm_feedback_label.setText("저장된 LLM 피드백이 없습니다.")
         
         try:
             start = datetime.fromisoformat(data['start_time'].replace('Z', ''))
@@ -852,6 +883,39 @@ class HistoryPage(QWidget):
         top_bar.addWidget(home_btn)
         layout.addLayout(top_bar)
 
+        # Date filter row
+        self._all_sessions = []
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("From:"))
+        self.from_date_edit = QDateEdit()
+        self.from_date_edit.setCalendarPopup(True)
+        self.from_date_edit.setDisplayFormat("yyyy-MM-dd")
+        today = date.today()
+        self.from_date_edit.setDate(QDate(today.year, today.month, today.day))
+        self.from_date_edit.setStyleSheet("background-color: #2D2D2D; color: #E0E0E0; padding: 6px; border-radius: 6px;")
+        filter_row.addWidget(self.from_date_edit)
+        filter_row.addWidget(QLabel("To:"))
+        self.to_date_edit = QDateEdit()
+        self.to_date_edit.setCalendarPopup(True)
+        self.to_date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.to_date_edit.setDate(QDate(2030, 12, 31))
+        self.to_date_edit.setStyleSheet("background-color: #2D2D2D; color: #E0E0E0; padding: 6px; border-radius: 6px;")
+        filter_row.addWidget(self.to_date_edit)
+        search_btn = QPushButton("Search")
+        search_btn.setObjectName("SecondaryBtn")
+        search_btn.clicked.connect(self._apply_filter)
+        filter_row.addWidget(search_btn)
+        clear_btn = QPushButton("Clear")
+        clear_btn.setObjectName("SecondaryBtn")
+        def clear_filter():
+            self.from_date_edit.setDate(QDate(2000, 1, 1))
+            self.to_date_edit.setDate(QDate(2030, 12, 31))
+            self._apply_filter()
+        clear_btn.clicked.connect(clear_filter)
+        filter_row.addWidget(clear_btn)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
+
         # History Table
         self.table = QTableWidget()
         self.table.setColumnCount(5)
@@ -893,20 +957,34 @@ class HistoryPage(QWidget):
         return dt
 
     def load_data(self):
-        history = self.network_client.get_history()
-        self.table.setRowCount(len(history))
-        for i, session in enumerate(history):
-            # Date (로컬 시각으로 표시)
+        self._all_sessions = self.network_client.get_history()
+        self._apply_filter()
+
+    def _apply_filter(self):
+        from_q = self.from_date_edit.date()
+        to_q = self.to_date_edit.date()
+        from_date = date(from_q.year(), from_q.month(), from_q.day())
+        to_date = date(to_q.year(), to_q.month(), to_q.day())
+
+        filtered = []
+        for session in self._all_sessions:
+            start_time = self._parse_dt_local(session.get('start_time'))
+            if start_time is None:
+                filtered.append(session)
+                continue
+            session_date = start_time.date()
+            if from_date <= session_date <= to_date:
+                filtered.append(session)
+
+        self.table.setRowCount(len(filtered))
+        for i, session in enumerate(filtered):
             start_time = self._parse_dt_local(session.get('start_time'))
             if start_time is not None:
                 self.table.setItem(i, 0, QTableWidgetItem(start_time.strftime("%Y-%m-%d %H:%M")))
             else:
                 self.table.setItem(i, 0, QTableWidgetItem("-"))
-            # Focus Ratio
             self.table.setItem(i, 1, QTableWidgetItem(f"{int(session['focus_ratio'])}%"))
-            # Distractions
             self.table.setItem(i, 2, QTableWidgetItem(str(session['distraction_count'])))
-            # Duration
             try:
                 end_time = self._parse_dt_local(session.get('end_time'))
                 if start_time is not None and end_time is not None:
@@ -918,7 +996,6 @@ class HistoryPage(QWidget):
                     self.table.setItem(i, 3, QTableWidgetItem("-"))
             except Exception:
                 self.table.setItem(i, 3, QTableWidgetItem("-"))
-            # ID
             self.table.setItem(i, 4, QTableWidgetItem(session['session_id'][:8] + "..."))
             self.table.item(i, 4).setData(Qt.ItemDataRole.UserRole, session)
 
@@ -1052,7 +1129,9 @@ class MainWindow(QMainWindow):
 
     def show_report_detail(self, session_data):
         self.report_page.set_report_data(session_data)
-        self.report_page.set_llm_button_visible(False) # 과거 기록 조회 시에는 버튼 숨김
+        # 과거 세션: llm_comment가 없을 때만 "LLM 분석 시작" 버튼 표시 (나중에 분석 요청 가능)
+        has_llm = bool((session_data.get('llm_comment') or "").strip())
+        self.report_page.set_llm_button_visible(not has_llm)
         self.stack.setCurrentWidget(self.report_page)
 
     def check_server_connection(self):
