@@ -3,6 +3,7 @@ import httpx
 import asyncio
 import logging
 import secrets
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.security.api_key import APIKeyHeader
 from shared.schemas import InferenceRequest, InferenceResponse
@@ -67,6 +68,129 @@ AI_HEAD_URL = os.getenv("AI_HEAD_URL", "http://localhost:8001/inference")
 AI_EMOTION_URL = os.getenv("AI_EMOTION_URL", "http://localhost:8002/inference")
 AI_BODY_URL = os.getenv("AI_BODY_URL", "http://localhost:8003/inference")
 
+# Operation Server (세션/로그 조회) & LLM Server (피드백 생성)
+OPERATION_SERVER_URL = os.getenv("OPERATION_SERVER_URL", "http://localhost:8000").rstrip("/")
+LLM_SERVER_URL = os.getenv("LLM_SERVER_URL", "http://localhost:8004/feedback").rstrip("/")
+
+def _preprocess_session_for_llm(session_summary: dict, logs: list) -> dict:
+    """
+    클라이언트 load_and_draw_graphs와 동일한 방식으로 연속 집중 구간·sleepy·비집중 시각 계산.
+    """
+    if not logs:
+        start_ts = session_summary.get("start_time") or ""
+        end_ts = session_summary.get("end_time") or ""
+        start_str = start_ts if isinstance(start_ts, str) else (start_ts.isoformat() if hasattr(start_ts, "isoformat") else str(start_ts))
+        end_str = end_ts if isinstance(end_ts, str) else (end_ts.isoformat() if hasattr(end_ts, "isoformat") else str(end_ts))
+        return {
+            "duration": 0,
+            "focus_score": session_summary.get("focus_ratio", 0),
+            "distract_cnt": session_summary.get("distraction_count", 0),
+            "start_time": start_str,
+            "end_time": end_str,
+            "longest_focus_seconds": 0,
+            "avg_focus_seconds": 0,
+            "sleepy_timestamps": [],
+            "distracted_timestamps": [],
+        }
+
+    # timestamp 기준 정렬 (문자열이면 파싱)
+    def _ts(log):
+        t = log.get("timestamp")
+        if t is None:
+            return None
+        if isinstance(t, str):
+            return datetime.fromisoformat(t.replace("Z", "+00:00").replace("Z", ""))
+        return t
+
+    sorted_logs = sorted([l for l in logs if _ts(l) is not None], key=_ts)
+    if not sorted_logs:
+        start_ts = session_summary.get("start_time") or ""
+        end_ts = session_summary.get("end_time") or ""
+        start_str = start_ts if isinstance(start_ts, str) else (start_ts.isoformat() if hasattr(start_ts, "isoformat") else str(start_ts))
+        end_str = end_ts if isinstance(end_ts, str) else (end_ts.isoformat() if hasattr(end_ts, "isoformat") else str(end_ts))
+        return {
+            "duration": 0,
+            "focus_score": session_summary.get("focus_ratio", 0),
+            "distract_cnt": session_summary.get("distraction_count", 0),
+            "start_time": start_str,
+            "end_time": end_str,
+            "longest_focus_seconds": 0,
+            "avg_focus_seconds": 0,
+            "sleepy_timestamps": [],
+            "distracted_timestamps": [],
+        }
+
+    timestamps = [_ts(l) for l in sorted_logs]
+    is_distracted_list = [bool(l.get("is_distracted")) for l in sorted_logs]
+    base = timestamps[0]
+    relative_times = [(t - base).total_seconds() for t in timestamps]
+
+    # 연속 집중 구간 길이 (클라이언트와 동일)
+    focus_segment_durations = []
+    current_segment = 0.0
+    for i in range(len(relative_times) - 1):
+        time_diff = relative_times[i + 1] - relative_times[i]
+        if is_distracted_list[i]:
+            if current_segment > 0:
+                focus_segment_durations.append(current_segment)
+                current_segment = 0.0
+        else:
+            current_segment += time_diff
+    if len(relative_times) > 0 and not is_distracted_list[-1]:
+        current_segment += 3.0
+    if current_segment > 0:
+        focus_segment_durations.append(current_segment)
+
+    longest_focus_seconds = max(focus_segment_durations) if focus_segment_durations else 0
+    avg_focus_seconds = (sum(focus_segment_durations) / len(focus_segment_durations)) if focus_segment_durations else 0
+
+    def _ts_str(log):
+        t = log.get("timestamp")
+        if t is None:
+            return ""
+        return t.isoformat() if hasattr(t, "isoformat") else str(t)
+
+    sleepy_timestamps = []
+    distracted_timestamps = []
+    for log in sorted_logs:
+        ts = _ts_str(log)
+        emotion = (log.get("emotion_data") or {}).get("emotion") or ""
+        msg = (log.get("status_message") or "").lower()
+        if "sleepy" in emotion.lower() or "sleepy" in msg:
+            sleepy_timestamps.append(ts)
+        if log.get("is_distracted"):
+            distracted_timestamps.append(ts)
+
+    start_ts = session_summary.get("start_time")
+    end_ts = session_summary.get("end_time")
+    start_str = start_ts if isinstance(start_ts, str) else (start_ts.isoformat() if start_ts and hasattr(start_ts, "isoformat") else str(start_ts or ""))
+    end_str = end_ts if isinstance(end_ts, str) else (end_ts.isoformat() if end_ts and hasattr(end_ts, "isoformat") else str(end_ts or ""))
+
+    duration_seconds = 0
+    if start_ts and end_ts:
+        try:
+            if isinstance(start_ts, str):
+                start_ts = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+            if isinstance(end_ts, str):
+                end_ts = datetime.fromisoformat(end_ts.replace("Z", "+00:00"))
+            duration_seconds = int((end_ts - start_ts).total_seconds())
+        except Exception:
+            if len(relative_times) >= 2:
+                duration_seconds = int(relative_times[-1] - relative_times[0]) + 3
+
+    return {
+        "duration": max(0, duration_seconds),
+        "focus_score": session_summary.get("focus_ratio", 0),
+        "distract_cnt": session_summary.get("distraction_count", 0),
+        "start_time": start_str,
+        "end_time": end_str,
+        "longest_focus_seconds": round(longest_focus_seconds, 1),
+        "avg_focus_seconds": round(avg_focus_seconds, 1),
+        "sleepy_timestamps": sleepy_timestamps,
+        "distracted_timestamps": distracted_timestamps,
+    }
+
+
 async def call_ai_server(client: httpx.AsyncClient, url: str, request: InferenceRequest):
     try:
         headers = {API_KEY_NAME: API_KEY}
@@ -82,6 +206,62 @@ async def call_ai_server(client: httpx.AsyncClient, url: str, request: Inference
 @app.get("/health")
 async def health_check(api_key: str = Depends(get_api_key)):
     return {"status": "ok", "service": "ai_interface"}
+
+
+@app.post("/sessions/{session_id}/feedback")
+async def session_feedback(session_id: str, api_key: str = Depends(get_api_key)):
+    """
+    Operation Server가 호출. Operation에서 세션·로그 조회 후 전처리 → LLM 호출 → llm_comment만 반환.
+    """
+    headers = {API_KEY_NAME: api_key}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            session_resp = await client.get(
+                f"{OPERATION_SERVER_URL}/sessions/{session_id}",
+                headers=headers
+            )
+            session_resp.raise_for_status()
+            session_summary = session_resp.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Session not found")
+            raise HTTPException(status_code=502, detail="Operation server session fetch failed")
+        except Exception as e:
+            logger.error(f"Operation session fetch: {e}")
+            raise HTTPException(status_code=502, detail="Operation server unavailable")
+
+        try:
+            logs_resp = await client.get(
+                f"{OPERATION_SERVER_URL}/sessions/{session_id}/logs",
+                headers=headers
+            )
+            logs_resp.raise_for_status()
+            logs_payload = logs_resp.json()
+            logs = logs_payload.get("logs", [])
+        except Exception as e:
+            logger.error(f"Operation logs fetch: {e}")
+            logs = []
+
+    session_data = _preprocess_session_for_llm(session_summary, logs)
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as llm_client:
+            llm_resp = await llm_client.post(
+                LLM_SERVER_URL,
+                json={"session_data": session_data},
+                headers=headers
+            )
+            llm_resp.raise_for_status()
+            llm_result = llm_resp.json()
+    except Exception as e:
+        logger.error(f"LLM feedback request: {e}")
+        raise HTTPException(status_code=502, detail="LLM server request failed")
+
+    comment = llm_result.get("comment", "")
+    feedback = llm_result.get("feedback", "")
+    llm_comment = f"{comment}\n\n{feedback}" if (comment and feedback) else (comment or feedback or "피드백을 생성하지 못했습니다.")
+    return {"llm_comment": llm_comment}
+
 
 @app.post("/inference", response_model=InferenceResponse)
 async def inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):

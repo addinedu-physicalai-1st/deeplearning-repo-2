@@ -73,8 +73,8 @@ if not API_KEY:
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
-# Service URLs
-AI_INTERFACE_URL = os.getenv("AI_INTERFACE_URL", "http://localhost:8010/inference")
+# Service URLs (AI_INTERFACE_URL is base e.g. http://localhost:8010; inference = base + /inference)
+AI_INTERFACE_BASE = (os.getenv("AI_INTERFACE_URL", "http://localhost:8010").rstrip("/").replace("/inference", "") or "http://localhost:8010")
 LLM_SERVER_URL = os.getenv("LLM_SERVER_URL", "http://localhost:8004/feedback")
 
 @app.get("/health")
@@ -88,6 +88,22 @@ async def start_session(api_key: str = Depends(api_key_header), db: Session = De
     db.commit()
     db.refresh(new_session)
     return SessionStartResponse(session_id=new_session.id, start_time=new_session.start_time)
+
+@app.get("/sessions/{session_id}", response_model=SessionSummary)
+async def get_session(session_id: str, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+    """단일 세션 조회 (AI Interface가 세션 요약 조회 시 사용)."""
+    session = db.query(models.MonitoringSession).filter(models.MonitoringSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    kst = ZoneInfo("Asia/Seoul")
+    return SessionSummary(
+        session_id=session.id,
+        start_time=session.start_time.replace(tzinfo=kst) if session.start_time else None,
+        end_time=session.end_time.replace(tzinfo=kst) if session.end_time else None,
+        focus_ratio=session.focus_ratio,
+        distraction_count=session.distraction_count,
+        llm_comment=session.llm_comment
+    )
 
 @app.get("/sessions", response_model=List[SessionSummary])
 async def get_sessions(api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
@@ -147,7 +163,8 @@ async def get_session_logs(session_id: str, api_key: str = Depends(api_key_heade
         FocusLogItem(
             timestamp=log.timestamp,
             is_distracted=log.is_distracted,
-            status_message=log.status_message
+            status_message=log.status_message,
+            emotion_data=log.emotion_data
         ) for log in logs
     ]
     
@@ -158,41 +175,34 @@ async def get_session_logs(session_id: str, api_key: str = Depends(api_key_heade
 
 @app.post("/sessions/{session_id}/feedback")
 async def generate_session_feedback(session_id: str, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+    """클라이언트가 호출. AI Interface로 위임 후 llm_comment 저장·반환."""
     session = db.query(models.MonitoringSession).filter(models.MonitoringSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # 세션 지속 시간 계산
     duration_seconds = 0
     if session.end_time and session.start_time:
         duration = session.end_time - session.start_time
         duration_seconds = int(duration.total_seconds())
     
-    if duration_seconds < 10: # 테스트 편의를 위해 10초로 하향
+    if duration_seconds < 10:
         session.llm_comment = "모니터링 시간이 너무 짧아 코멘트를 생성하지 못하였습니다."
         db.commit()
         return {"llm_comment": session.llm_comment}
 
     try:
-        session_data = {
-            'duration': duration_seconds,
-            'focus_score': session.focus_ratio,
-            'distract_cnt': session.distraction_count,
-            'model_type': 'HEAD'
-        }
-        
+        feedback_url = f"{AI_INTERFACE_BASE.rstrip('/')}/sessions/{session_id}/feedback"
         async with httpx.AsyncClient(timeout=60.0) as client:
             headers = {API_KEY_NAME: API_KEY}
-            response = await client.post(LLM_SERVER_URL, json={"session_data": session_data}, headers=headers)
+            response = await client.post(feedback_url, json={}, headers=headers)
             response.raise_for_status()
-            llm_result = response.json()
-            comment = llm_result.get("comment", "")
-            feedback = llm_result.get("feedback", "")
-            session.llm_comment = f"{comment}\n\n{feedback}" if comment and feedback else (comment or feedback)
+            result = response.json()
+            llm_comment = result.get("llm_comment", "")
+            session.llm_comment = llm_comment
             db.commit()
             return {"llm_comment": session.llm_comment}
     except Exception as e:
-        logger.error(f"LLM Error: {e}")
+        logger.error(f"AI Interface feedback Error: {e}")
         raise HTTPException(status_code=500, detail="LLM 분석 중 오류가 발생했습니다.")
 
 @app.post("/inference", response_model=InferenceResponse)
@@ -200,7 +210,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(api_key_he
     async with httpx.AsyncClient() as client:
         try:
             headers = {API_KEY_NAME: API_KEY}
-            response = await client.post(AI_INTERFACE_URL, json=request.dict(), headers=headers, timeout=5.0)
+            response = await client.post(f"{AI_INTERFACE_BASE.rstrip('/')}/inference", json=request.dict(), headers=headers, timeout=5.0)
             response.raise_for_status()
             ai_result = response.json()
             

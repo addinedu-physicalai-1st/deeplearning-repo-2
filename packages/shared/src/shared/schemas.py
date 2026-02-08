@@ -56,6 +56,7 @@ class FocusLogItem(BaseModel):
     timestamp: datetime
     is_distracted: bool
     status_message: Optional[str] = None
+    emotion_data: Optional[dict] = None
 
 class SessionLogsResponse(BaseModel):
     session_id: Union[str, UUID]

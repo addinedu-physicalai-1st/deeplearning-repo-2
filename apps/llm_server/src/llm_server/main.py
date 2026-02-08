@@ -68,22 +68,37 @@ async def get_api_key(header_api_key: str = Depends(api_key_header)):
 def generate_prompt(session_data: dict) -> str:
     """
     세션 데이터를 기반으로 Ollama용 프롬프트를 생성합니다.
-    원본 LLM 클라이언트 로직을 기반으로 합니다.
+    start_time, end_time, 최장/평균 집중시간, sleepy 시각, 비집중 시각을 포함합니다.
     """
     duration_min = session_data.get('duration', 0) // 60
     score = session_data.get('focus_score', 0)
     distractions = session_data.get('distract_cnt', 0)
-    model_type = session_data.get('model_type', 'HEAD')
-    
-    prompt = (
-        f"당신은 업무 생산성 코치입니다. 다음 세션 데이터를 분석해주세요.\n"
-        f"- 집중 시간: {duration_min}분\n"
-        f"- 집중 점수: {score}점\n"
-        f"- 산만 횟수: {distractions}회\n"
-        f"- 감지 모델: {model_type}\n\n"
-        f"사용자의 감정을 고려한 따뜻한 격려나 위로의 말(comment)과 데이터에 기반한 구체적이고 실천 가능한 행동 교정 팁(feedback)을 제공해주세요."
-    )
-    return prompt
+    start_time = session_data.get('start_time', '')
+    end_time = session_data.get('end_time', '')
+    longest_focus = session_data.get('longest_focus_seconds', 0)
+    avg_focus = session_data.get('avg_focus_seconds', 0)
+    sleepy_ts = session_data.get('sleepy_timestamps', [])
+    distracted_ts = session_data.get('distracted_timestamps', [])
+
+    lines = [
+        "당신은 업무 생산성 코치입니다. 다음 세션 데이터를 분석해주세요.",
+        f"- 집중 시간: {duration_min}분",
+        f"- 집중 점수: {score}점",
+        f"- 산만 횟수: {distractions}회",
+    ]
+    if start_time or end_time:
+        lines.append(f"- 세션 시작: {start_time}")
+        lines.append(f"- 세션 종료: {end_time}")
+    if longest_focus is not None or avg_focus is not None:
+        lines.append(f"- 최장 연속 집중시간: {longest_focus}초")
+        lines.append(f"- 평균 연속 집중시간: {avg_focus}초")
+    if sleepy_ts:
+        lines.append(f"- sleepy로 감지된 시각: {', '.join(str(t) for t in sleepy_ts[:20])}{' ...' if len(sleepy_ts) > 20 else ''}")
+    if distracted_ts:
+        lines.append(f"- 비집중으로 기록된 시각(일부): {', '.join(str(t) for t in distracted_ts[:15])}{' ...' if len(distracted_ts) > 15 else ''}")
+    lines.append("")
+    lines.append("사용자의 감정을 고려한 따뜻한 격려나 위로의 말(comment)과 데이터에 기반한 구체적이고 실천 가능한 행동 교정 팁(feedback)을 제공해주세요.")
+    return "\n".join(lines)
 
 @app.get("/")
 async def root():
