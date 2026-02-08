@@ -98,6 +98,7 @@ def generate_prompt(session_data: dict) -> str:
         lines.append(f"- 비집중으로 기록된 시각(일부): {', '.join(str(t) for t in distracted_ts[:15])}{' ...' if len(distracted_ts) > 15 else ''}")
     lines.append("")
     lines.append("사용자의 감정을 고려한 따뜻한 격려나 위로의 말(comment)과 데이터에 기반한 구체적이고 실천 가능한 행동 교정 팁(feedback)을 제공해주세요.")
+    lines.append("feedback은 반드시 1. 2. 3. 처럼 번호를 붙인 항목으로 작성해주세요.")
     return "\n".join(lines)
 
 @app.get("/")

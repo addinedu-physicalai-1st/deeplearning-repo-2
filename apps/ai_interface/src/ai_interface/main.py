@@ -259,7 +259,14 @@ async def session_feedback(session_id: str, api_key: str = Depends(get_api_key))
 
     comment = llm_result.get("comment", "")
     feedback = llm_result.get("feedback", "")
-    llm_comment = f"{comment}\n\n{feedback}" if (comment and feedback) else (comment or feedback or "피드백을 생성하지 못했습니다.")
+    if comment and feedback:
+        llm_comment = f"[격려]\n{comment}\n\n[행동팁]\n{feedback}"
+    elif comment:
+        llm_comment = f"[격려]\n{comment}"
+    elif feedback:
+        llm_comment = f"[행동팁]\n{feedback}"
+    else:
+        llm_comment = "피드백을 생성하지 못했습니다."
     return {"llm_comment": llm_comment}
 
 
