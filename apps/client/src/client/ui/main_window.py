@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QEasingCurve
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont
 import pyqtgraph as pg
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from client.core.camera import Camera
 from client.core.network import NetworkClient
@@ -447,8 +447,10 @@ class ReportPage(QWidget):
         stats_grid = QGridLayout()
         stats_grid.setSpacing(20)
         self.add_report_stat(stats_grid, "FOCUS RATIO", "0%", 0, 0, "ratio")
-        self.add_report_stat(stats_grid, "DISTRACTIONS", "0", 0, 1, "dist")
-        self.add_report_stat(stats_grid, "DURATION", "00:00", 0, 2, "duration")
+        self.add_report_stat(stats_grid, "DURATION", "00:00", 0, 1, "duration")
+        self.add_report_stat(stats_grid, "DISTRACTIONS", "0", 0, 2, "dist")
+        self.add_report_stat(stats_grid, "최장 집중시간", "--", 0, 3, "longest_focus")
+        self.add_report_stat(stats_grid, "평균 집중시간", "--", 0, 4, "avg_focus")
         stats_layout.addLayout(stats_grid)
         stats_layout.addStretch()
         main_layout.addWidget(stats_card)
@@ -470,6 +472,7 @@ class ReportPage(QWidget):
         self.bar_plot.setLabel('left', '시간 (초)')
         self.bar_plot.setLabel('bottom', '')
         self.bar_plot.getAxis('bottom').setTicks([[(0, '집중'), (1, '비집중')]])
+        self.bar_plot.getAxis('bottom').setHeight(36)
         bar_vbox.addWidget(self.bar_plot)
         graphs_layout.addWidget(bar_card, stretch=1)
 
@@ -488,7 +491,7 @@ class ReportPage(QWidget):
         self.line1_plot = pg.PlotWidget()
         self.line1_plot.setBackground('#1E1E1E')
         self.line1_plot.setLabel('left', '집중 여부')
-        self.line1_plot.setLabel('bottom', '시간 (초)')
+        self.line1_plot.setLabel('bottom', '시간')
         self.line1_plot.setYRange(0, 1.2)
         self.line1_plot.getAxis('left').setTicks([[(0, '비집중'), (1, '집중')]])
         line1_vbox.addWidget(self.line1_plot)
@@ -532,16 +535,24 @@ class ReportPage(QWidget):
         self.current_session_id = data.get('session_id')
         self.report_ratio.setText(f"{int(data.get('focus_ratio', 0))}%")
         self.report_dist.setText(str(data.get('distraction_count', 0)))
+        self.report_longest_focus.setText("--")
+        self.report_avg_focus.setText("--")
+        self._session_start_dt = None
+        self._session_end_dt = None
         
         try:
             start = datetime.fromisoformat(data['start_time'].replace('Z', ''))
             end = datetime.fromisoformat(data['end_time'].replace('Z', ''))
+            self._session_start_dt = start
+            self._session_end_dt = end
             duration = end - start
             minutes = int(duration.total_seconds() // 60)
             seconds = int(duration.total_seconds() % 60)
             self.report_duration.setText(f"{minutes:02d}:{seconds:02d}")
-        except:
+        except Exception:
             self.report_duration.setText("00:00")
+            self._session_start_dt = None
+            self._session_end_dt = None
         
         # 그래프 데이터 로드 및 표시
         if self.network_client and self.current_session_id:
@@ -579,11 +590,50 @@ class ReportPage(QWidget):
         start_time = timestamps[0]
         relative_times = [(ts - start_time).total_seconds() for ts in timestamps]
         
+        # 연속 집중 구간 길이 계산 (최장/평균 집중시간용)
+        focus_segment_durations = []
+        current_segment = 0.0
+        for i in range(len(relative_times) - 1):
+            time_diff = relative_times[i + 1] - relative_times[i]
+            if is_distracted_list[i]:  # 비집중
+                if current_segment > 0:
+                    focus_segment_durations.append(current_segment)
+                    current_segment = 0.0
+            else:  # 집중
+                current_segment += time_diff
+        if len(relative_times) > 0 and not is_distracted_list[-1]:
+            current_segment += 3.0  # 마지막 로그 이후 3초 (bar chart와 동일)
+        if current_segment > 0:
+            focus_segment_durations.append(current_segment)
+        
+        def _format_duration(seconds: float) -> str:
+            if seconds <= 0:
+                return "0초"
+            if seconds >= 60:
+                m = int(seconds // 60)
+                s = int(seconds % 60)
+                return f"{m}분 {s}초"
+            return f"{int(seconds)}초"
+        
+        if focus_segment_durations:
+            longest_sec = max(focus_segment_durations)
+            avg_sec = sum(focus_segment_durations) / len(focus_segment_durations)
+            self.report_longest_focus.setText(_format_duration(longest_sec))
+            self.report_avg_focus.setText(_format_duration(avg_sec))
+        else:
+            self.report_longest_focus.setText("0초")
+            self.report_avg_focus.setText("0초")
+        
         # 1. 막대 그래프: 집중 시간 vs 비집중 시간
         self.draw_bar_chart(is_distracted_list, relative_times)
         
         # 2. 선 그래프 1: 시간에 따른 집중 여부
-        self.draw_focus_status_chart(relative_times, is_distracted_list)
+        self.draw_focus_status_chart(
+            relative_times,
+            is_distracted_list,
+            getattr(self, "_session_start_dt", None),
+            getattr(self, "_session_end_dt", None),
+        )
         
         # 3. 선 그래프 2: 10분 단위 구간별 연속 집중 시간 횟수
         self.draw_focus_duration_chart(relative_times, is_distracted_list)
@@ -621,8 +671,14 @@ class ReportPage(QWidget):
         self.bar_plot.addItem(bg2)
         self.bar_plot.setXRange(-0.5, 1.5)
 
-    def draw_focus_status_chart(self, relative_times, is_distracted_list):
-        """선 그래프 1: 시간에 따른 집중 여부"""
+    def draw_focus_status_chart(
+        self,
+        relative_times,
+        is_distracted_list,
+        session_start_dt=None,
+        session_end_dt=None,
+    ):
+        """선 그래프 1: 시간에 따른 집중 여부. X축 min=start_time, max=end_time(세션 구간)."""
         self.line1_plot.clear()
         
         # 집중 여부를 0(비집중) 또는 1(집중)로 표시
@@ -630,8 +686,31 @@ class ReportPage(QWidget):
         
         pen = pg.mkPen(color='#BB86FC', width=2)
         self.line1_plot.plot(relative_times, focus_values, pen=pen)
-        self.line1_plot.setXRange(min(relative_times) if relative_times else 0, 
-                                  max(relative_times) if relative_times else 1)
+        
+        if session_start_dt is not None and session_end_dt is not None:
+            duration_seconds = (session_end_dt - session_start_dt).total_seconds()
+            self.line1_plot.setXRange(0, duration_seconds)
+            # 서버는 UTC로 저장하므로 로컬 시각으로 변환 후 X축 눈금 표시
+            def _utc_to_local(dt):
+                return dt.replace(tzinfo=timezone.utc).astimezone()
+            start_local = _utc_to_local(session_start_dt)
+            end_local = _utc_to_local(session_end_dt)
+            d = duration_seconds
+            tick_positions = [0, d / 4, d / 2, 3 * d / 4, d]
+            tick_labels = [
+                start_local.strftime("%H:%M"),
+                _utc_to_local(session_start_dt + timedelta(seconds=d / 4)).strftime("%H:%M"),
+                _utc_to_local(session_start_dt + timedelta(seconds=d / 2)).strftime("%H:%M"),
+                _utc_to_local(session_start_dt + timedelta(seconds=3 * d / 4)).strftime("%H:%M"),
+                end_local.strftime("%H:%M"),
+            ]
+            ticks = [(pos, label) for pos, label in zip(tick_positions, tick_labels)]
+            self.line1_plot.getAxis("bottom").setTicks([ticks])
+        else:
+            self.line1_plot.setXRange(
+                min(relative_times) if relative_times else 0,
+                max(relative_times) if relative_times else 1,
+            )
 
     def draw_focus_duration_chart(self, relative_times, is_distracted_list):
         """선 그래프 2: 10분 단위 구간별 연속 집중 시간 횟수"""
