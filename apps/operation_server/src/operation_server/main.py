@@ -158,13 +158,23 @@ async def get_session_logs(session_id: str, api_key: str = Depends(api_key_heade
         raise HTTPException(status_code=404, detail="Session not found")
     
     logs = db.query(models.FocusLog).filter(models.FocusLog.session_id == session_id).order_by(models.FocusLog.timestamp).all()
-    
+
+    def _normalize_emotion_data(data):
+        if data is None:
+            return None
+        if isinstance(data, str):
+            try:
+                return json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return data if isinstance(data, dict) else None
+
     log_items = [
         FocusLogItem(
             timestamp=log.timestamp,
             is_distracted=log.is_distracted,
             status_message=log.status_message,
-            emotion_data=log.emotion_data
+            emotion_data=_normalize_emotion_data(log.emotion_data)
         ) for log in logs
     ]
     
