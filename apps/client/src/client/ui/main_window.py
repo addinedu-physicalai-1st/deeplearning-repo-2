@@ -1,4 +1,5 @@
 import sys
+import json
 import cv2
 import time
 import logging
@@ -678,7 +679,14 @@ class ReportPage(QWidget):
                 ts = datetime.fromisoformat(log['timestamp'].replace('Z', ''))
                 timestamps.append(ts)
                 is_distracted_list.append(1 if log['is_distracted'] else 0)
-                emotion_data = log.get('emotion_data') or {}
+                raw_emotion = log.get('emotion_data')
+                if isinstance(raw_emotion, str):
+                    try:
+                        emotion_data = json.loads(raw_emotion) or {}
+                    except (json.JSONDecodeError, TypeError):
+                        emotion_data = {}
+                else:
+                    emotion_data = raw_emotion or {}
                 emotion = (emotion_data.get('emotion') or '').strip().lower()
                 if emotion == 'sleepy':
                     sleepy_timestamps.append(ts)
@@ -819,8 +827,11 @@ class ReportPage(QWidget):
         for ts in sleepy_timestamps:
             try:
                 sec = (ts - session_start_dt).total_seconds()
-            except TypeError:
-                continue
+            except (TypeError, OverflowError):
+                try:
+                    sec = ts.timestamp() - session_start_dt.timestamp()
+                except (TypeError, OverflowError, OSError):
+                    continue
             if 0 <= sec < duration_seconds:
                 bucket = min(int(sec // interval_seconds), num_buckets - 1)
                 counts[bucket] += 1
