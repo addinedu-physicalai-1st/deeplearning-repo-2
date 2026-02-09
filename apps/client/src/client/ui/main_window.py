@@ -534,7 +534,7 @@ class ReportPage(QWidget):
         feedback_scroll.setWidgetResizable(True)
         feedback_scroll.setWidget(self.report_llm_feedback_label)
         feedback_scroll.setMinimumHeight(130)
-        feedback_scroll.setMaximumHeight(220)
+        feedback_scroll.setMaximumHeight(400)
         feedback_scroll.setFrameShape(QFrame.Shape.NoFrame)
         feedback_scroll.setStyleSheet("QScrollArea { background: transparent; }")
         feedback_card_vbox.addWidget(feedback_scroll)
@@ -824,7 +824,7 @@ class LlmAnalysisPage(QWidget):
         title.setObjectName("Title")
         card_layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # Feedback Area
+        # Feedback Area (scrollable when content is long)
         self.feedback_text = QLabel("AI가 당신의 집중 패턴을 분석하고 있습니다. 잠시만 기다려주세요...")
         self.feedback_text.setWordWrap(True)
         self.feedback_text.setStyleSheet("""
@@ -836,7 +836,15 @@ class LlmAnalysisPage(QWidget):
             line-height: 1.6;
         """)
         self.feedback_text.setAlignment(Qt.AlignmentFlag.AlignTop)
-        card_layout.addWidget(self.feedback_text)
+        self.feedback_text.setMinimumWidth(600)
+        feedback_scroll = QScrollArea()
+        feedback_scroll.setWidgetResizable(True)
+        feedback_scroll.setWidget(self.feedback_text)
+        feedback_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        feedback_scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        feedback_scroll.setMinimumHeight(280)
+        feedback_scroll.setMaximumHeight(400)
+        card_layout.addWidget(feedback_scroll)
 
         home_btn = QPushButton("BACK TO HOME")
         home_btn.setObjectName("PrimaryBtn")
