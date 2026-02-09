@@ -637,7 +637,9 @@ class ReportPage(QWidget):
             self.report_llm_feedback_label.setText(llm_comment)
         else:
             self.report_llm_feedback_label.setText("저장된 LLM 피드백이 없습니다.")
-        
+        # 스크롤 영역의 실제 너비에 맞춰 라벨 크기 조정
+        QTimer.singleShot(50, lambda: self.report_llm_feedback_label.adjustSize())
+
         try:
             start = datetime.fromisoformat(data['start_time'].replace('Z', ''))
             end = datetime.fromisoformat(data['end_time'].replace('Z', ''))
