@@ -652,6 +652,8 @@ class HeadPoseCalibrationPage(QWidget):
         self.measure_btn.setEnabled(True)
         self.next_step_btn.setEnabled(True)
         self._update_measured_display()
+        # 각 방향 측정이 끝날 때 효과음 재생
+        QApplication.beep()
 
     def _on_next_step(self):
         if self.current_step < 4:
