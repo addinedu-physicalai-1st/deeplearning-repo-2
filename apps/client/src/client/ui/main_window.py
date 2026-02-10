@@ -662,6 +662,8 @@ class HeadPoseCalibrationPage(QWidget):
         elif self.current_step == 4:
             self.current_step = 5
             self._update_ui()
+        # 각 방향 측정이 끝날 때 효과음 재생
+            QApplication.beep()
 
     def _update_ui(self):
         step_messages = {0: "준비 중...", 1: "1/4 단계: 위를 보세요", 2: "2/4 단계: 아래를 보세요", 3: "3/4 단계: 좌측을 보세요", 4: "4/4 단계: 우측을 보세요", 5: "측정 완료"}
