@@ -15,6 +15,7 @@ class InferenceResponse(BaseModel):
     emotion: Optional[dict] = None
     body_pose: Optional[dict] = None
     gaze_data: Optional[dict] = None
+    concentration_score: Optional[float] = None
 
 class SessionStartResponse(BaseModel):
     session_id: Union[str, UUID]

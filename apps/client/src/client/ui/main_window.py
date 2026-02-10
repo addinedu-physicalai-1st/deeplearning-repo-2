@@ -2024,8 +2024,11 @@ class MainWindow(QMainWindow):
             m_page.posture_alert_label.show()
             QApplication.beep()
             QTimer.singleShot(2000, m_page.posture_alert_label.hide)
+        # concentration_score가 오면 그 값을 FOCUS SCORE로 사용, 없으면 기존 로직 fallback
+        score = getattr(result, "concentration_score", None)
+        if score is None:
+            score = max(0, 100 - (self.distraction_count * 2))
 
-        score = max(0, 100 - (self.distraction_count * 2))
         m_page.stat_score.setText(f"{int(score)}%")
         self.history_scores.append(score)
         if len(self.history_scores) > 100: self.history_scores.pop(0)

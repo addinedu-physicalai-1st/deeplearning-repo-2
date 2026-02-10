@@ -321,72 +321,97 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             # 하나라도 True이면 최종적으로 집중하지 않은 것으로 판단
             is_distracted = head_distracted or emotion_distracted or body_distracted or gaze_distracted
 
-    ###################################################################################################
-            # # Orchestration Logic
-            # EMOTION_WEIGHT = 0.3
-            # POSITION_WEIGHT = 0.3
-            # HEAD_WEIGHT = 0.4
+            # ---- 추가: 가중치 기반 concentration_score 계산 ----
+            EMOTION_WEIGHT = 0.3
+            POSITION_WEIGHT = 0.3
+            HEAD_WEIGHT = 0.4
 
-            # MONITOR_DISTANCE_CM = 30
-            # MONITOR_WIDTH_CM = 50
-            # MONITOR_HEIGHT_CM = 30
-            # MONITOR_WIDTH_PX = 1920
-            # MONITOR_HEIGHT_PX = 1080
+            # ai_body에서 캘리브레이션한 baseline_distance_cm을 모니터 거리로 사용
+            baseline_cm = None
+            if body_result:
+                baseline_cm = (body_result.get("body_pose") or {}).get("baseline_distance_cm")
 
-            # emotion_cls = emotion_result.get("emotion", {}).get("emotion", "") if emotion_result else 0
-            # emotion_confidence = emotion_result.get("emotion", {}).get("confidence", 0.0) if emotion_result else 0.0
-            # if emotion_cls == "Concentrated":
-            #     emotion_score = 0.5 + emotion_confidence * 0.5
-            # elif emotion_cls == "Distracted":
-            #     emotion_score = (1 - emotion_confidence) * 0.5
-            # elif emotion_cls == "Sleepy":
-            #     emotion_score = 0.0
-            # else:
-            #     pass
+            MONITOR_DISTANCE_CM = (
+                float(baseline_cm)
+                if isinstance(baseline_cm, (int, float)) and baseline_cm > 0
+                else 30.0
+            )
+            MONITOR_WIDTH_CM = 50.0
+            MONITOR_HEIGHT_CM = 30.0
+            MONITOR_WIDTH_PX = 1920.0
+            MONITOR_HEIGHT_PX = 1080.0
 
-            # position_distance = body_result.get("body_pose", {}).get("distance_cm", 0.0) if body_result else 0.0
-            # position_score = max(0, (50 - position_distance) / 50)
+            # 1) Emotion score
+            emotion_score = 0.5
+            if emotion_result:
+                emo = emotion_result.get("emotion") or {}
+                emotion_cls = emo.get("emotion", "")
+                emotion_confidence = float(emo.get("confidence", 0.0))
+                if emotion_cls == "Concentrated":
+                    emotion_score = 0.5 + emotion_confidence * 0.5
+                elif emotion_cls == "Distracted":
+                    emotion_score = (1.0 - emotion_confidence) * 0.5
+                elif emotion_cls == "Sleepy":
+                    emotion_score = 0.0
 
+            # 2) Position (body) score
+            position_score = 0.5
+            if body_result:
+                distance_cm = (body_result.get("body_pose") or {}).get("distance_cm")
+                if isinstance(distance_cm, (int, float)) and distance_cm > 0:
+                    position_score = max(0.0, min(1.0, (50.0 - distance_cm) / 50.0))
 
-            # yaw_rad = math.radians(head_result.get("head_pose", {}).get("yaw", 0.0)) if head_result else 0.0
-            # pitch_rad = math.radians(head_result.get("head_pose", {}).get("pitch", 0.0)) if head_result else 0.0
+            # 3) Head + gaze score
+            head_gaze_score = 0.5
+            gaze_cordinate_x = None
+            gaze_cordinate_y = None
+            if gaze_result:
+                gaze_data = gaze_result.get("gaze_data") or {}
+                gaze_coord = gaze_data.get("gaze_cordinate") or {}
+                gaze_cordinate_x = gaze_coord.get("x")
+                gaze_cordinate_y = gaze_coord.get("y")
 
-            # gaze_cordinate_x = gaze_result.get("gaze_cordinate", {}).get("x", 0.0) if gaze_result else 0.0
-            # gaze_cordinate_y = gaze_result.get("gaze_cordinate", {}).get("y", 0.0) if gaze_result else 0.0
-            # head_direction_x = math.sin(yaw_rad) * math.cos(pitch_rad)
-            # head_direction_y = -math.sin(pitch_rad)
-            # head_direction_z = math.cos(yaw_rad) * math.cos(pitch_rad)
+            yaw_rad = math.radians((head_result.get("head_pose") or {}).get("yaw", 0.0)) if head_result else 0.0
+            pitch_rad = math.radians((head_result.get("head_pose") or {}).get("pitch", 0.0)) if head_result else 0.0
 
-            # if gaze_cordinate_x is not None:
-            #     if head_direction_z > 0:
-            #         # head 방향 벡터를 30cm 거리의 모니터 평면에 투영 (cm 단위)
-            #         t = MONITOR_DISTANCE_CM / head_direction_z
-            #         head_point_x_cm = head_direction_x * t
-            #         head_point_y_cm = head_direction_y * t
-                    
-            #         # cm를 픽셀로 변환 (모니터 중심을 원점으로 가정)
-            #         head_point_x_px = (head_point_x_cm / MONITOR_WIDTH_CM) * MONITOR_WIDTH_PX + (MONITOR_WIDTH_PX / 2)
-            #         head_point_y_px = (head_point_y_cm / MONITOR_HEIGHT_CM) * MONITOR_HEIGHT_PX + (MONITOR_HEIGHT_PX / 2)
-            #     else:
-            #         head_point_x_px = MONITOR_WIDTH_PX / 2
-            #         head_point_y_px = MONITOR_HEIGHT_PX / 2
+            head_direction_x = math.sin(yaw_rad) * math.cos(pitch_rad)
+            head_direction_y = -math.sin(pitch_rad)
+            head_direction_z = math.cos(yaw_rad) * math.cos(pitch_rad)
 
-            #     # gaze_coordinate와 head가 가리키는 좌표 사이의 거리 계산 (픽셀 단위)
-            #     dx = gaze_cordinate_x - head_point_x_px
-            #     dy = gaze_cordinate_y - head_point_y_px
-            #     head_gaze_score = 1 - min(1, math.sqrt(dx * dx + dy * dy) / (MONITOR_HEIGHT_PX / 2))
-            # else:
-            #     if head_result.get("is_distracted", False):
-            #         head_gaze_score = 0.0
-            #     else:
-            #         head_gaze_score = 1.0
+            if gaze_cordinate_x is not None and gaze_cordinate_y is not None:
+                if head_direction_z > 0:
+                    t = MONITOR_DISTANCE_CM / head_direction_z
+                    head_point_x_cm = head_direction_x * t
+                    head_point_y_cm = head_direction_y * t
 
-            # is_monitor = 1 if gaze_cordinate_x else 0
-            # is_seat = 1 if emotion_result else 0
+                    head_point_x_px = (head_point_x_cm / MONITOR_WIDTH_CM) * MONITOR_WIDTH_PX + (MONITOR_WIDTH_PX / 2.0)
+                    head_point_y_px = (head_point_y_cm / MONITOR_HEIGHT_CM) * MONITOR_HEIGHT_PX + (MONITOR_HEIGHT_PX / 2.0)
+                else:
+                    head_point_x_px = MONITOR_WIDTH_PX / 2.0
+                    head_point_y_px = MONITOR_HEIGHT_PX / 2.0
 
-            # concentration_score = is_monitor * is_seat * (EMOTION_WEIGHT * emotion_score + POSITION_WEIGHT * position_score + HEAD_WEIGHT * head_gaze_score)
+                dx = float(gaze_cordinate_x) - head_point_x_px
+                dy = float(gaze_cordinate_y) - head_point_y_px
+                dist_norm = min(1.0, math.sqrt(dx * dx + dy * dy) / (MONITOR_HEIGHT_PX / 2.0))
+                head_gaze_score = 1.0 - dist_norm
+            else:
+                # 시선 정보가 없으면, head_result의 is_distracted만 반영
+                head_gaze_score = 0.0 if head_result.get("is_distracted", False) else 1.0
 
-    ###################################################################################################
+            # 신호 유무와 상관없이 항상 점수를 계산하도록 is_monitor, is_seat는 1로 고정
+            is_monitor = 1
+            is_seat = 1
+
+            concentration_score = (
+                EMOTION_WEIGHT * emotion_score
+                + POSITION_WEIGHT * position_score
+                + HEAD_WEIGHT * head_gaze_score
+            )
+
+            logger.info(
+                f"[ORCH] concentration_score={concentration_score:.3f} "
+                f"(emotion={emotion_score:.2f}, position={position_score:.2f}, head_gaze={head_gaze_score:.2f})"
+            )
 
             # 상태 메시지 구성
             if is_distracted:
@@ -403,13 +428,17 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             else:
                 status_message = "Focused"
 
+            # concentration_score는 0~1 범위이므로 0~100%로 변환해서 내려줌
+            concentration_pct = max(0.0, min(100.0, concentration_score * 100.0))
+
             return InferenceResponse(
                 is_distracted=is_distracted,
                 status_message=status_message,
                 head_pose=head_result.get("head_pose"),
                 emotion=emotion_result.get("emotion") if emotion_result else None,
                 body_pose=body_result.get("body_pose") if body_result else None,
-                gaze_data=gaze_result.get("gaze_data") if gaze_result else None
+                gaze_data=gaze_result.get("gaze_data") if gaze_result else None,
+                concentration_score=concentration_pct,
             )
         except Exception as e:
             logger.exception("Internal Error in AI Interface")
