@@ -432,9 +432,12 @@ class DistanceCalibrationPage(QWidget):
         image_rgb, shoulder_angle, distance_cm, posture_percentage, distance_offset_cm = self.monitor.process_frame(frame)
         self.current_distance_cm = distance_cm
 
-        h, w, ch = image_rgb.shape
+        # 화면 표시용으로만 좌우 반전 (거울처럼 보이도록)
+        display_image = cv2.flip(image_rgb, 1)
+
+        h, w, ch = display_image.shape
         bytes_per_line = ch * w
-        qt_image = QImage(image_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        qt_image = QImage(display_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
         self.video_label.setPixmap(QPixmap.fromImage(qt_image).scaled(
             640, 480, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
