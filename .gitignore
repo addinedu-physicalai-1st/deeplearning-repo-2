@@ -220,3 +220,6 @@ app/.venv/
 
 # YOLO model files
 *.pt
+
+# ai_head 캘리브레이션 임계값 (로컬 저장)
+**/thresholds.json

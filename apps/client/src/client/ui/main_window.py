@@ -7,7 +7,7 @@ import numpy as np
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication,
                              QProgressBar, QDateEdit, QScrollArea)
-from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QRectF, QEasingCurve, QDate
+from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QRectF, QEasingCurve, QDate, QElapsedTimer
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont, QPainter, QPen, QBrush, QPainterPath
 import pyqtgraph as pg
 from datetime import datetime, timedelta, timezone, date
@@ -59,6 +59,7 @@ class MainPage(QWidget):
     start_requested = pyqtSignal()
     history_requested = pyqtSignal()
     calibration_requested = pyqtSignal()
+    head_calibration_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -92,6 +93,11 @@ class MainPage(QWidget):
         self.calibration_btn.setObjectName("SecondaryBtn")
         self.calibration_btn.clicked.connect(self.calibration_requested.emit)
         card_layout.addWidget(self.calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.head_calibration_btn = QPushButton("머리 각도 캘리브레이션")
+        self.head_calibration_btn.setObjectName("SecondaryBtn")
+        self.head_calibration_btn.clicked.connect(self.head_calibration_requested.emit)
+        card_layout.addWidget(self.head_calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.start_btn = QPushButton("START NEW SESSION")
         self.start_btn.setObjectName("PrimaryBtn")
@@ -250,6 +256,247 @@ class DistanceCalibrationPage(QWidget):
             self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #03DAC6;")
         else:
             self.status_label.setText("ai_body 서버 연결 실패. 서버를 확인하세요.")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #CF6679;")
+
+
+class HeadPoseCalibrationPage(QWidget):
+    """머리 각도 캘리브레이션 화면 (yaw, pitch 임계값 설정). ai_body DistanceCalibrationPage 참조."""
+    done_requested = pyqtSignal()
+
+    def __init__(self, camera: Camera, network_client: NetworkClient):
+        super().__init__()
+        self.camera = camera
+        self.network_client = network_client
+        self.current_frame = None
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._update_frame)
+        self.current_step = 0
+        self.measuring = False
+        self.measure_timer = QElapsedTimer()
+        self.measure_duration_ms = 3000
+        self.measured_values = {"pitch_up": None, "pitch_down": None, "yaw_left": None, "yaw_right": None}
+        self.current_pitch = None
+        self.current_yaw = None
+        self.current_roll = None
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QHBoxLayout(self)
+        left = QVBoxLayout()
+        self.video_label = QLabel("Camera")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_label.setStyleSheet("background-color: black; border: 2px solid #333;")
+        self.video_label.setFixedSize(640, 480)
+        left.addWidget(self.video_label)
+        self.status_label = QLabel("준비 중...")
+        self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFB74D;")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left.addWidget(self.status_label)
+        layout.addLayout(left)
+
+        panel = QFrame()
+        panel.setObjectName("Card")
+        panel.setStyleSheet("QFrame#Card { background-color: #1E1E1E; border-radius: 12px; border: 1px solid #333; }")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setSpacing(12)
+        title = QLabel("머리 각도 캘리브레이션")
+        title.setObjectName("Title")
+        title.setStyleSheet("font-size: 22px; color: #BB86FC;")
+        panel_layout.addWidget(title)
+        self.step_label = QLabel("단계: 대기 중")
+        self.step_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #03DAC6;")
+        panel_layout.addWidget(self.step_label)
+        self.pitch_label = QLabel("Pitch (위/아래): --°")
+        self.pitch_label.setStyleSheet("font-size: 16px; color: #9E9E9E;")
+        panel_layout.addWidget(self.pitch_label)
+        self.yaw_label = QLabel("Yaw (좌/우): --°")
+        self.yaw_label.setStyleSheet("font-size: 16px; color: #9E9E9E;")
+        panel_layout.addWidget(self.yaw_label)
+        self.roll_label = QLabel("Roll (기울기): --°")
+        self.roll_label.setStyleSheet("font-size: 16px; color: #9E9E9E;")
+        panel_layout.addWidget(self.roll_label)
+        panel_layout.addSpacing(10)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("QProgressBar { border: 2px solid #03DAC6; border-radius: 5px; background-color: #333; } QProgressBar::chunk { background-color: #03DAC6; }")
+        self.progress_bar.hide()
+        panel_layout.addWidget(self.progress_bar)
+        self.measured_label = QLabel("")
+        self.measured_label.setStyleSheet("font-size: 14px; color: #64B5F6;")
+        self.measured_label.setWordWrap(True)
+        panel_layout.addWidget(self.measured_label)
+        panel_layout.addStretch(1)
+        self.measure_btn = QPushButton("측정 시작")
+        self.measure_btn.setObjectName("PrimaryBtn")
+        self.measure_btn.clicked.connect(self._on_measure)
+        panel_layout.addWidget(self.measure_btn)
+        self.next_step_btn = QPushButton("다음 단계")
+        self.next_step_btn.setObjectName("SecondaryBtn")
+        self.next_step_btn.clicked.connect(self._on_next_step)
+        self.next_step_btn.setEnabled(False)
+        panel_layout.addWidget(self.next_step_btn)
+        self.set_thresholds_btn = QPushButton("임계값 설정")
+        self.set_thresholds_btn.setObjectName("PrimaryBtn")
+        self.set_thresholds_btn.clicked.connect(self._on_set_thresholds)
+        self.set_thresholds_btn.setEnabled(False)
+        panel_layout.addWidget(self.set_thresholds_btn)
+        self.done_btn = QPushButton("완료")
+        self.done_btn.setObjectName("SecondaryBtn")
+        self.done_btn.clicked.connect(self.done_requested.emit)
+        panel_layout.addWidget(self.done_btn)
+        layout.addWidget(panel)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.timer.start(33)
+        self._reset_calibration()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.timer.stop()
+
+    def _reset_calibration(self):
+        self.current_step = 0
+        self.measuring = False
+        self.measured_values = {"pitch_up": None, "pitch_down": None, "yaw_left": None, "yaw_right": None}
+        self._update_ui()
+
+    def _update_frame(self):
+        frame = self.camera.get_frame()
+        if frame is None:
+            return
+        self.current_frame = frame
+        image_base64 = self.camera.frame_to_base64(frame)
+        head_pose = self.network_client.get_head_pose(image_base64)
+        if head_pose:
+            self.current_pitch = head_pose.get("pitch")
+            self.current_yaw = head_pose.get("yaw")
+            self.current_roll = head_pose.get("roll")
+        else:
+            self.current_pitch = None
+            self.current_yaw = None
+            self.current_roll = None
+        display_frame = cv2.flip(frame, 1)
+        h, w, ch = display_frame.shape
+        bytes_per_line = ch * w
+        qt_image = QImage(display_frame.data, w, h, bytes_per_line, QImage.Format.Format_BGR888)
+        self.video_label.setPixmap(QPixmap.fromImage(qt_image).scaled(640, 480, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        if self.current_pitch is not None:
+            self.pitch_label.setText(f"Pitch (위/아래): {self.current_pitch:.1f}°")
+        else:
+            self.pitch_label.setText("Pitch (위/아래): --°")
+        if self.current_yaw is not None:
+            self.yaw_label.setText(f"Yaw (좌/우): {self.current_yaw:.1f}°")
+        else:
+            self.yaw_label.setText("Yaw (좌/우): --°")
+        if self.current_roll is not None:
+            self.roll_label.setText(f"Roll (기울기): {self.current_roll:.1f}°")
+        else:
+            self.roll_label.setText("Roll (기울기): --°")
+        if self.measuring and self.measure_timer.isValid():
+            elapsed_ms = self.measure_timer.elapsed()
+            progress = min(100, int((elapsed_ms / self.measure_duration_ms) * 100))
+            self.progress_bar.setValue(progress)
+            if elapsed_ms >= self.measure_duration_ms:
+                self._finish_measurement()
+            else:
+                self._track_angle()
+
+    def _track_angle(self):
+        if self.current_step == 1 and self.current_pitch is not None:
+            if self.measured_values["pitch_up"] is None or self.current_pitch < self.measured_values["pitch_up"]:
+                self.measured_values["pitch_up"] = self.current_pitch
+        elif self.current_step == 2 and self.current_pitch is not None:
+            if self.measured_values["pitch_down"] is None or self.current_pitch > self.measured_values["pitch_down"]:
+                self.measured_values["pitch_down"] = self.current_pitch
+        elif self.current_step == 3 and self.current_yaw is not None:
+            if self.measured_values["yaw_left"] is None or self.current_yaw < self.measured_values["yaw_left"]:
+                self.measured_values["yaw_left"] = self.current_yaw
+        elif self.current_step == 4 and self.current_yaw is not None:
+            if self.measured_values["yaw_right"] is None or self.current_yaw > self.measured_values["yaw_right"]:
+                self.measured_values["yaw_right"] = self.current_yaw
+
+    def _on_measure(self):
+        if self.current_step == 0:
+            self.current_step = 1
+            self._update_ui()
+        if 1 <= self.current_step <= 4:
+            self.measuring = True
+            self.measure_timer.start()
+            self.progress_bar.show()
+            self.progress_bar.setValue(0)
+            self.measure_btn.setEnabled(False)
+            self.next_step_btn.setEnabled(False)
+
+    def _finish_measurement(self):
+        self.measuring = False
+        self.progress_bar.hide()
+        self.measure_btn.setEnabled(True)
+        self.next_step_btn.setEnabled(True)
+        self._update_measured_display()
+
+    def _on_next_step(self):
+        if self.current_step < 4:
+            self.current_step += 1
+            self._update_ui()
+        elif self.current_step == 4:
+            self.current_step = 5
+            self._update_ui()
+
+    def _update_ui(self):
+        step_messages = {0: "준비 중...", 1: "1/4 단계: 위를 보세요", 2: "2/4 단계: 아래를 보세요", 3: "3/4 단계: 좌측을 보세요", 4: "4/4 단계: 우측을 보세요", 5: "측정 완료"}
+        self.step_label.setText(f"단계: {step_messages.get(self.current_step, '')}")
+        if self.current_step == 0:
+            self.status_label.setText("측정을 시작하세요")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFB74D;")
+            self.measure_btn.setText("측정 시작")
+            self.measure_btn.setEnabled(True)
+            self.next_step_btn.setEnabled(False)
+            self.set_thresholds_btn.setEnabled(False)
+        elif 1 <= self.current_step <= 4:
+            self.status_label.setText(step_messages[self.current_step])
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #03DAC6;")
+            self.measure_btn.setEnabled(not self.measuring)
+            key = ["pitch_up", "pitch_down", "yaw_left", "yaw_right"][self.current_step - 1]
+            self.next_step_btn.setEnabled(not self.measuring and self.measured_values.get(key) is not None)
+        elif self.current_step == 5:
+            self.status_label.setText("모든 측정이 완료되었습니다.")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #03DAC6;")
+            self.measure_btn.setEnabled(False)
+            self.next_step_btn.setEnabled(False)
+            self.set_thresholds_btn.setEnabled(True)
+            self._update_measured_display()
+
+    def _update_measured_display(self):
+        parts = []
+        if self.measured_values["pitch_up"] is not None:
+            parts.append(f"위: {self.measured_values['pitch_up']:.1f}°")
+        if self.measured_values["pitch_down"] is not None:
+            parts.append(f"아래: {self.measured_values['pitch_down']:.1f}°")
+        if self.measured_values["yaw_left"] is not None:
+            parts.append(f"좌: {self.measured_values['yaw_left']:.1f}°")
+        if self.measured_values["yaw_right"] is not None:
+            parts.append(f"우: {self.measured_values['yaw_right']:.1f}°")
+        self.measured_label.setText("측정값:\n" + "\n".join(parts) if parts else "")
+
+    def _on_set_thresholds(self):
+        pitch_up = self.measured_values.get("pitch_up")
+        pitch_down = self.measured_values.get("pitch_down")
+        yaw_left = self.measured_values.get("yaw_left")
+        yaw_right = self.measured_values.get("yaw_right")
+        if pitch_up is None or pitch_down is None or yaw_left is None or yaw_right is None:
+            self.status_label.setText("모든 방향의 측정이 완료되지 않았습니다.")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #FF9800;")
+            return
+        yaw_limit = max(abs(yaw_left), abs(yaw_right))
+        ok = self.network_client.set_head_thresholds(pitch_up, pitch_down, yaw_limit)
+        if ok:
+            self.status_label.setText(f"임계값이 설정되었습니다.\nPitch: {pitch_up:.1f}° ~ {pitch_down:.1f}°\nYaw: ±{yaw_limit:.1f}°")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #03DAC6;")
+        else:
+            self.status_label.setText("ai_head 서버 연결 실패. 서버를 확인하세요.")
             self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #CF6679;")
 
 
@@ -1096,6 +1343,7 @@ class MainWindow(QMainWindow):
 
         self.main_page = MainPage()
         self.calibration_page = DistanceCalibrationPage(self.camera, self.network_client)
+        self.head_calibration_page = HeadPoseCalibrationPage(self.camera, self.network_client)
         self.monitoring_page = MonitoringPage()
         self.report_page = ReportPage()
         self.report_page.set_network_client(self.network_client)
@@ -1104,6 +1352,7 @@ class MainWindow(QMainWindow):
 
         self.stack.addWidget(self.main_page)
         self.stack.addWidget(self.calibration_page)
+        self.stack.addWidget(self.head_calibration_page)
         self.stack.addWidget(self.monitoring_page)
         self.stack.addWidget(self.report_page)
         self.stack.addWidget(self.analysis_page)
@@ -1113,7 +1362,9 @@ class MainWindow(QMainWindow):
         self.main_page.start_requested.connect(self.start_session)
         self.main_page.history_requested.connect(self.show_history)
         self.main_page.calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.calibration_page))
+        self.main_page.head_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.head_calibration_page))
         self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.head_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.monitoring_page.stop_requested.connect(self.stop_session)
         self.monitoring_page.set_baseline_requested.connect(self._on_set_baseline_from_monitoring)
         self.report_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))

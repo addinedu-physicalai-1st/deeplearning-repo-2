@@ -1,10 +1,12 @@
 import os
+import json
 import cv2
 import numpy as np
 import base64
 import logging
 import secrets
-from fastapi import FastAPI, HTTPException, Depends
+from pathlib import Path
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.security.api_key import APIKeyHeader
 from shared.schemas import InferenceRequest, InferenceResponse
 from dotenv import load_dotenv
@@ -66,6 +68,45 @@ model = YOLO('yolov8n-pose.pt')
 # Target Tracking State
 target_id = None
 
+# Head Pose Thresholds (캘리브레이션으로 설정 가능, 파일에서 로드)
+PITCH_UP_LIMIT = -25
+PITCH_DOWN_LIMIT = 30
+YAW_LIMIT = 30
+
+THRESHOLDS_PATH = Path(__file__).resolve().parent.parent.parent / "thresholds.json"
+
+
+def _load_thresholds_from_file():
+    """저장된 임계값이 있으면 전역 변수를 갱신 (기동 시 호출)."""
+    global PITCH_UP_LIMIT, PITCH_DOWN_LIMIT, YAW_LIMIT
+    if not THRESHOLDS_PATH.exists():
+        return
+    try:
+        with open(THRESHOLDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        PITCH_UP_LIMIT = float(data.get("pitch_up_limit", PITCH_UP_LIMIT))
+        PITCH_DOWN_LIMIT = float(data.get("pitch_down_limit", PITCH_DOWN_LIMIT))
+        YAW_LIMIT = float(data.get("yaw_limit", YAW_LIMIT))
+        logger.info(f"임계값 로드: pitch_up={PITCH_UP_LIMIT}, pitch_down={PITCH_DOWN_LIMIT}, yaw={YAW_LIMIT}")
+    except (json.JSONDecodeError, TypeError, OSError) as e:
+        logger.warning(f"임계값 파일 로드 실패, 기본값 사용: {e}")
+
+
+def _save_thresholds_to_file():
+    """현재 전역 임계값을 파일에 저장."""
+    try:
+        with open(THRESHOLDS_PATH, "w", encoding="utf-8") as f:
+            json.dump(
+                {"pitch_up_limit": PITCH_UP_LIMIT, "pitch_down_limit": PITCH_DOWN_LIMIT, "yaw_limit": YAW_LIMIT},
+                f,
+                indent=2,
+            )
+    except OSError as e:
+        logger.warning(f"임계값 파일 저장 실패: {e}")
+
+
+_load_thresholds_from_file()
+
 async def get_api_key(header_api_key: str = Depends(api_key_header)):
     if header_api_key and secrets.compare_digest(header_api_key, API_KEY):
         return header_api_key
@@ -106,6 +147,110 @@ def estimate_pose(keypoints_normalized):
 @app.get("/health")
 async def health_check(api_key: str = Depends(get_api_key)):
     return {"status": "ok", "service": "ai_head"}
+
+@app.get("/thresholds")
+async def get_thresholds(api_key: str = Depends(get_api_key)):
+    """현재 설정된 임계값 조회"""
+    global PITCH_UP_LIMIT, PITCH_DOWN_LIMIT, YAW_LIMIT
+    return {
+        "pitch_up_limit": PITCH_UP_LIMIT,
+        "pitch_down_limit": PITCH_DOWN_LIMIT,
+        "yaw_limit": YAW_LIMIT
+    }
+
+@app.post("/set_thresholds")
+async def set_thresholds(
+    thresholds: dict = Body(...),
+    api_key: str = Depends(get_api_key)
+):
+    """머리 각도 임계값 설정"""
+    global PITCH_UP_LIMIT, PITCH_DOWN_LIMIT, YAW_LIMIT
+
+    pitch_up_limit = thresholds.get("pitch_up_limit")
+    pitch_down_limit = thresholds.get("pitch_down_limit")
+    yaw_limit = thresholds.get("yaw_limit")
+
+    if pitch_up_limit is None or pitch_down_limit is None or yaw_limit is None:
+        raise HTTPException(status_code=400, detail="pitch_up_limit, pitch_down_limit, yaw_limit이 모두 필요합니다")
+    if pitch_up_limit >= 0 or pitch_down_limit <= 0:
+        raise HTTPException(status_code=400, detail="pitch_up_limit은 음수, pitch_down_limit은 양수여야 합니다")
+    if yaw_limit <= 0:
+        raise HTTPException(status_code=400, detail="yaw_limit은 양수여야 합니다")
+
+    PITCH_UP_LIMIT = float(pitch_up_limit)
+    PITCH_DOWN_LIMIT = float(pitch_down_limit)
+    YAW_LIMIT = float(yaw_limit)
+
+    _save_thresholds_to_file()
+    logger.info(f"임계값 설정 및 저장: pitch_up={PITCH_UP_LIMIT}, pitch_down={PITCH_DOWN_LIMIT}, yaw={YAW_LIMIT}")
+
+    return {
+        "status": "ok",
+        "pitch_up_limit": PITCH_UP_LIMIT,
+        "pitch_down_limit": PITCH_DOWN_LIMIT,
+        "yaw_limit": YAW_LIMIT
+    }
+
+@app.post("/pose")
+async def get_pose_only(request: InferenceRequest, api_key: str = Depends(get_api_key)):
+    """캘리브레이션 전용: 집중 판단 없이 pitch, yaw, roll만 반환."""
+    global target_id
+
+    if not request.image_base64:
+        return {"head_pose": None}
+
+    try:
+        try:
+            img_data = base64.b64decode(request.image_base64)
+        except Exception:
+            return {"head_pose": None}
+        if len(img_data) < 4:
+            return {"head_pose": None}
+        is_valid_image = (
+            img_data.startswith(b'\xff\xd8\xff') or
+            img_data.startswith(b'\x89PNG') or
+            img_data.startswith(b'RIFF')
+        )
+        if not is_valid_image:
+            return {"head_pose": None}
+
+        nparr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"head_pose": None}
+
+        results = model.track(frame, persist=True, verbose=False)
+        if not results[0].boxes or results[0].boxes.id is None:
+            return {"head_pose": None}
+
+        boxes = results[0].boxes
+        ids = boxes.id.cpu().numpy().astype(int)
+        keypoints_data = results[0].keypoints.xyn.cpu().numpy()
+        img_h, img_w = frame.shape[:2]
+        centers = boxes.xywh.cpu().numpy()[:, :2]
+        center_points = np.array([img_w / 2, img_h / 2])
+        distances = np.linalg.norm(centers - center_points, axis=1)
+
+        if target_id is None or target_id not in ids:
+            target_idx = np.argmin(distances)
+            target_id = int(ids[target_idx])
+
+        try:
+            current_idx = list(ids).index(target_id)
+        except ValueError:
+            return {"head_pose": None}
+
+        target_kpts = keypoints_data[current_idx]
+        pitch, yaw, roll = estimate_pose(target_kpts)
+        return {
+            "head_pose": {
+                "pitch": float(pitch),
+                "yaw": float(yaw),
+                "roll": float(roll),
+            }
+        }
+    except Exception:
+        return {"head_pose": None}
 
 @app.post("/inference", response_model=InferenceResponse)
 async def inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
@@ -175,11 +320,9 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         target_kpts = keypoints_data[current_idx]
         pitch, yaw, roll= estimate_pose(target_kpts)
 
-        # Thresholds (실용적인 범위로 재조정)
-        YAW_LIMIT = 30
-        PITCH_UP_LIMIT = -25
-        PITCH_DOWN_LIMIT = 30
-        
+        # Thresholds (전역 변수 사용)
+        global PITCH_UP_LIMIT, PITCH_DOWN_LIMIT, YAW_LIMIT
+
         is_distracted = False
         reason = ""
 
