@@ -84,7 +84,7 @@ def _preprocess_session_for_llm(session_summary: dict, logs: list) -> dict:
         end_str = end_ts if isinstance(end_ts, str) else (end_ts.isoformat() if hasattr(end_ts, "isoformat") else str(end_ts))
         return {
             "duration": 0,
-            "focus_score": session_summary.get("focus_ratio", 0),
+            "concentration_score": session_summary.get("concentration_score", 0),
             "distract_cnt": session_summary.get("distraction_count", 0),
             "start_time": start_str,
             "end_time": end_str,
@@ -111,7 +111,7 @@ def _preprocess_session_for_llm(session_summary: dict, logs: list) -> dict:
         end_str = end_ts if isinstance(end_ts, str) else (end_ts.isoformat() if hasattr(end_ts, "isoformat") else str(end_ts))
         return {
             "duration": 0,
-            "focus_score": session_summary.get("focus_ratio", 0),
+            "concentration_score": session_summary.get("concentration_score", 0),
             "distract_cnt": session_summary.get("distraction_count", 0),
             "start_time": start_str,
             "end_time": end_str,
@@ -181,7 +181,7 @@ def _preprocess_session_for_llm(session_summary: dict, logs: list) -> dict:
 
     return {
         "duration": max(0, duration_seconds),
-        "focus_score": session_summary.get("focus_ratio", 0),
+        "concentration_score": session_summary.get("concentration_score", 0),
         "distract_cnt": session_summary.get("distraction_count", 0),
         "start_time": start_str,
         "end_time": end_str,

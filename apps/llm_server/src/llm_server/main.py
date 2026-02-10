@@ -71,7 +71,7 @@ def generate_prompt(session_data: dict) -> str:
     start_time, end_time, 최장/평균 집중시간, sleepy 시각, 비집중 시각을 포함합니다.
     """
     duration_min = session_data.get('duration', 0) // 60
-    score = session_data.get('focus_score', 0)
+    score = session_data.get('concentration_score', 0)
     distractions = session_data.get('distract_cnt', 0)
     start_time = session_data.get('start_time', '')
     end_time = session_data.get('end_time', '')
@@ -126,7 +126,7 @@ async def generate_feedback(
         
         # 프롬프트 생성
         prompt = generate_prompt(session_data)
-        logger.info(f"세션 피드백 생성 중: score={session_data.get('focus_score')}, duration={session_data.get('duration')}")
+        logger.info(f"세션 피드백 생성 중: score={session_data.get('concentration_score')}, duration={session_data.get('duration')}")
         
         # 구조화된 출력으로 Ollama 호출
         try:
