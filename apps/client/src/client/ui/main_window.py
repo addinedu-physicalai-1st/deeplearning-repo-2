@@ -4,9 +4,7 @@ import cv2
 import time
 import logging
 import numpy as np
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication,
-                             QProgressBar, QDateEdit, QScrollArea)
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication, QProgressBar, QDateEdit, QScrollArea, QLineEdit
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QRectF, QEasingCurve, QDate, QElapsedTimer
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont, QPainter, QPen, QBrush, QPainterPath
 import pyqtgraph as pg
@@ -43,6 +41,201 @@ STYLE_SHEET = """
     }
 """
 
+INPUT_STYLE = """
+    QLineEdit {
+        background-color: #2D2D2D; color: #E0E0E0; border: 1px solid #555;
+        border-radius: 8px; padding: 12px; font-size: 14px;
+    }
+    QLineEdit:focus { border: 1px solid #BB86FC; }
+"""
+
+class LoginPage(QWidget):
+    login_success = pyqtSignal(dict)
+    register_requested = pyqtSignal()
+
+    def __init__(self, network_client):
+        super().__init__()
+        self.network_client = network_client
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QFrame()
+        card.setObjectName("Card")
+        card.setFixedSize(420, 480)
+        card_layout = QVBoxLayout(card)
+        card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.setSpacing(16)
+        card_layout.setContentsMargins(40, 40, 40, 40)
+
+        title = QLabel("FOCUS MONITOR")
+        title.setObjectName("Title")
+        card_layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        subtitle = QLabel("로그인하여 시작하세요")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("font-size: 14px; color: #9E9E9E;")
+        card_layout.addWidget(subtitle)
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("아이디")
+        self.username_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.username_input)
+
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("비밀번호")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.password_input)
+
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #CF6679; font-size: 12px;")
+        self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.error_label.hide()
+        card_layout.addWidget(self.error_label)
+
+        login_btn = QPushButton("LOGIN")
+        login_btn.setObjectName("PrimaryBtn")
+        login_btn.clicked.connect(self._on_login)
+        card_layout.addWidget(login_btn)
+
+        register_btn = QPushButton("CREATE ACCOUNT")
+        register_btn.setObjectName("SecondaryBtn")
+        register_btn.clicked.connect(self.register_requested.emit)
+        card_layout.addWidget(register_btn)
+
+        layout.addWidget(card)
+
+        self.password_input.returnPressed.connect(self._on_login)
+
+    def _on_login(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        if not username or not password:
+            self.error_label.setText("아이디와 비밀번호를 입력해주세요.")
+            self.error_label.show()
+            return
+        result = self.network_client.login(username, password)
+        if result and "error" not in result:
+            self.error_label.hide()
+            self.login_success.emit(result)
+        elif result and result.get("error") == "invalid_credentials":
+            self.error_label.setText(result.get("detail", "아이디 또는 비밀번호가 올바르지 않습니다."))
+            self.error_label.show()
+        else:
+            self.error_label.setText("서버 연결 오류")
+            self.error_label.show()
+
+    def clear_fields(self):
+        self.username_input.clear()
+        self.password_input.clear()
+        self.error_label.hide()
+
+
+class RegisterPage(QWidget):
+    register_success = pyqtSignal(dict)
+    back_to_login = pyqtSignal()
+
+    def __init__(self, network_client):
+        super().__init__()
+        self.network_client = network_client
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QFrame()
+        card.setObjectName("Card")
+        card.setFixedSize(420, 560)
+        card_layout = QVBoxLayout(card)
+        card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.setSpacing(14)
+        card_layout.setContentsMargins(40, 30, 40, 30)
+
+        title = QLabel("회원가입")
+        title.setObjectName("Title")
+        card_layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("아이디 (3자 이상)")
+        self.username_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.username_input)
+
+        self.display_name_input = QLineEdit()
+        self.display_name_input.setPlaceholderText("이름")
+        self.display_name_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.display_name_input)
+
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("비밀번호 (6자 이상)")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.password_input)
+
+        self.password_confirm_input = QLineEdit()
+        self.password_confirm_input.setPlaceholderText("비밀번호 확인")
+        self.password_confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_confirm_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.password_confirm_input)
+
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #CF6679; font-size: 12px;")
+        self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.error_label.setWordWrap(True)
+        self.error_label.hide()
+        card_layout.addWidget(self.error_label)
+
+        register_btn = QPushButton("REGISTER")
+        register_btn.setObjectName("PrimaryBtn")
+        register_btn.clicked.connect(self._on_register)
+        card_layout.addWidget(register_btn)
+
+        back_btn = QPushButton("BACK TO LOGIN")
+        back_btn.setObjectName("SecondaryBtn")
+        back_btn.clicked.connect(self.back_to_login.emit)
+        card_layout.addWidget(back_btn)
+
+        layout.addWidget(card)
+
+    def _on_register(self):
+        username = self.username_input.text().strip()
+        display_name = self.display_name_input.text().strip()
+        password = self.password_input.text()
+        confirm = self.password_confirm_input.text()
+
+        if not username or not display_name or not password:
+            self.error_label.setText("모든 항목을 입력해주세요.")
+            self.error_label.show()
+            return
+        if len(username) < 3:
+            self.error_label.setText("아이디는 3자 이상이어야 합니다.")
+            self.error_label.show()
+            return
+        if len(password) < 6:
+            self.error_label.setText("비밀번호는 6자 이상이어야 합니다.")
+            self.error_label.show()
+            return
+        if password != confirm:
+            self.error_label.setText("비밀번호가 일치하지 않습니다.")
+            self.error_label.show()
+            return
+
+        result = self.network_client.register(username, password, display_name)
+        if result and "error" not in result:
+            self.error_label.hide()
+            self.register_success.emit(result)
+        elif result and result.get("error") == "duplicate":
+            self.error_label.setText(result.get("detail", "이미 사용 중인 아이디입니다."))
+            self.error_label.show()
+        else:
+            self.error_label.setText("서버 연결 오류")
+            self.error_label.show()
+
+    def clear_fields(self):
+        self.username_input.clear()
+        self.display_name_input.clear()
+        self.password_input.clear()
+        self.password_confirm_input.clear()
+        self.error_label.hide()
+
+
 class InferenceThread(QThread):
     result_ready = pyqtSignal(object)
     def __init__(self, network_client, image_base64, session_id=None):
@@ -60,6 +253,9 @@ class MainPage(QWidget):
     history_requested = pyqtSignal()
     calibration_requested = pyqtSignal()
     head_calibration_requested = pyqtSignal()
+    gaze_calibration_requested = pyqtSignal()
+    logout_requested = pyqtSignal()
+
 
     def __init__(self):
         super().__init__()
@@ -69,7 +265,7 @@ class MainPage(QWidget):
         # Welcome Card
         card = QFrame()
         card.setObjectName("Card")
-        card.setFixedSize(500, 450)
+        card.setFixedSize(500, 520)
         card_layout = QVBoxLayout(card)
         card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.setSpacing(20)
@@ -94,10 +290,17 @@ class MainPage(QWidget):
         self.calibration_btn.clicked.connect(self.calibration_requested.emit)
         card_layout.addWidget(self.calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
+
         self.head_calibration_btn = QPushButton("머리 각도 캘리브레이션")
         self.head_calibration_btn.setObjectName("SecondaryBtn")
         self.head_calibration_btn.clicked.connect(self.head_calibration_requested.emit)
         card_layout.addWidget(self.head_calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.gaze_calibration_btn = QPushButton("시선 캘리브레이션")
+        self.gaze_calibration_btn.setObjectName("SecondaryBtn")
+        self.gaze_calibration_btn.clicked.connect(self.gaze_calibration_requested.emit)
+        card_layout.addWidget(self.gaze_calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
 
         self.start_btn = QPushButton("START NEW SESSION")
         self.start_btn.setObjectName("PrimaryBtn")
@@ -110,6 +313,15 @@ class MainPage(QWidget):
         self.history_btn.setObjectName("SecondaryBtn")
         self.history_btn.clicked.connect(self.history_requested.emit)
         card_layout.addWidget(self.history_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.logout_btn = QPushButton("LOGOUT")
+        self.logout_btn.setStyleSheet(
+            "QPushButton { background-color: transparent; color: #9E9E9E; "
+            "font-size: 13px; border: none; padding: 8px; }"
+            "QPushButton:hover { color: #CF6679; }"
+        )
+        self.logout_btn.clicked.connect(self.logout_requested.emit)
+        card_layout.addWidget(self.logout_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(card)
 
@@ -267,6 +479,7 @@ class HeadPoseCalibrationPage(QWidget):
         super().__init__()
         self.camera = camera
         self.network_client = network_client
+
         self.current_frame = None
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_frame)
@@ -497,7 +710,260 @@ class HeadPoseCalibrationPage(QWidget):
             self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #03DAC6;")
         else:
             self.status_label.setText("ai_head 서버 연결 실패. 서버를 확인하세요.")
-            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #CF6679;")
+            self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #CF6679;")        
+
+class GazeCalibrationPage(QWidget):
+    """9-point 시선 캘리브레이션 화면 (외부 WebGazer 코드의 개념을 PyQt로 구현)."""
+    done_requested = pyqtSignal()
+
+    POINTS = [
+        (0.05, 0.05), (0.5, 0.05), (0.95, 0.05),
+        (0.05, 0.5),  (0.5, 0.5),  (0.95, 0.5),
+        (0.05, 0.95), (0.5, 0.95), (0.95, 0.95),
+    ]
+    CLICKS_PER_POINT = 5
+
+    def __init__(self, camera: Camera, network_client: NetworkClient):
+        super().__init__()
+        self.camera = camera
+        self.network_client = network_client
+
+        self.calibration_data = []
+        self.current_point_index = 0
+        self.current_click_count = 0
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._update_preview)
+
+        # 로컬 MediaPipe Face Mesh (iris 추출용)
+        import mediapipe as mp_lib
+        self._mp_face_mesh = mp_lib.solutions.face_mesh
+        self._face_mesh = self._mp_face_mesh.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # 상단 안내 영역
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(20, 10, 20, 10)
+
+        self.instruction_label = QLabel("빨간 점을 바라보며 클릭하세요")
+        self.instruction_label.setStyleSheet("font-size: 18px; color: #BB86FC; font-weight: bold;")
+        top_bar.addWidget(self.instruction_label)
+        top_bar.addStretch()
+
+        self.progress_label = QLabel("포인트 1/9 - 클릭 0/5")
+        self.progress_label.setStyleSheet("font-size: 16px; color: #03DAC6;")
+        top_bar.addWidget(self.progress_label)
+
+        layout.addLayout(top_bar)
+
+        # 캘리브레이션 영역 (클릭 가능, 빨간점 표시)
+        self.calib_area = QWidget()
+        self.calib_area.setStyleSheet("background-color: #121212;")
+        self.calib_area.setMouseTracking(False)
+        layout.addWidget(self.calib_area, stretch=1)
+
+        # 하단 상태/컨트롤 영역
+        bottom_bar = QHBoxLayout()
+        bottom_bar.setContentsMargins(20, 10, 20, 10)
+
+        self.status_label = QLabel("준비됨")
+        self.status_label.setStyleSheet("font-size: 14px; color: #9E9E9E;")
+        bottom_bar.addWidget(self.status_label)
+        bottom_bar.addStretch()
+
+        self.video_label = QLabel()
+        self.video_label.setFixedSize(160, 120)
+        self.video_label.setStyleSheet("border: 1px solid #333; background-color: black;")
+        bottom_bar.addWidget(self.video_label)
+
+        cancel_btn = QPushButton("취소")
+        cancel_btn.setObjectName("SecondaryBtn")
+        cancel_btn.clicked.connect(self.done_requested.emit)
+        bottom_bar.addWidget(cancel_btn)
+
+        layout.addLayout(bottom_bar)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._reset_calibration()
+        self.timer.start(33)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.timer.stop()
+
+    def _reset_calibration(self):
+        self.calibration_data = []
+        self.current_point_index = 0
+        self.current_click_count = 0
+        self._update_progress_text()
+        self.status_label.setText("준비됨")
+        self.status_label.setStyleSheet("font-size: 14px; color: #9E9E9E;")
+
+    def _update_progress_text(self):
+        if self.current_point_index < len(self.POINTS):
+            self.progress_label.setText(
+                f"포인트 {self.current_point_index + 1}/{len(self.POINTS)} - "
+                f"클릭 {self.current_click_count}/{self.CLICKS_PER_POINT}"
+            )
+        else:
+            self.progress_label.setText("캘리브레이션 완료")
+
+    def _update_preview(self):
+        """작은 카메라 미리보기 업데이트."""
+        frame = self.camera.get_frame()
+        if frame is None:
+            return
+        frame_mirror = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        qt_img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+        self.video_label.setPixmap(QPixmap.fromImage(qt_img).scaled(
+            160, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    def paintEvent(self, event):
+        """현재 캘리브레이션 포인트를 빨간 점으로 표시."""
+        super().paintEvent(event)
+        if self.current_point_index >= len(self.POINTS):
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rx, ry = self.POINTS[self.current_point_index]
+        x = int(self.width() * rx)
+        y = int(self.height() * ry)
+
+        # 외부 코드 스타일: 빨간 점 + 흰 테두리
+        painter.setPen(QPen(QColor("white"), 3))
+        painter.setBrush(QBrush(QColor(207, 102, 121)))  # #CF6679
+        painter.drawEllipse(x - 15, y - 15, 30, 30)
+
+        # 클릭 진행도 (작은 원으로 표시)
+        for i in range(self.current_click_count):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor("#03DAC6")))
+            offset_x = x - 12 + i * 6
+            painter.drawEllipse(offset_x, y + 20, 5, 5)
+
+        painter.end()
+
+    def mousePressEvent(self, event):
+        """캘리브레이션 클릭 처리: iris 위치 추출 + 화면 좌표 기록."""
+        if self.current_point_index >= len(self.POINTS):
+            return
+
+        frame = self.camera.get_frame()
+        if frame is None:
+            self.status_label.setText("카메라 프레임을 가져올 수 없습니다")
+            self.status_label.setStyleSheet("font-size: 14px; color: #CF6679;")
+            return
+
+        iris_pos = self._extract_iris(frame)
+        if iris_pos is None:
+            self.status_label.setText("얼굴이 감지되지 않습니다 - 카메라를 바라보세요")
+            self.status_label.setStyleSheet("font-size: 14px; color: #FFB74D;")
+            return
+
+        iris_x, iris_y = iris_pos
+        rx, ry = self.POINTS[self.current_point_index]
+
+        # 실제 화면 해상도 기준 좌표 (캘리브레이션은 전체 화면 좌표 필요)
+        screen = QApplication.primaryScreen()
+        screen_size = screen.size()
+        screen_x = screen_size.width() * rx
+        screen_y = screen_size.height() * ry
+
+        self.calibration_data.append({
+            "iris_x": iris_x,
+            "iris_y": iris_y,
+            "screen_x": screen_x,
+            "screen_y": screen_y,
+        })
+
+        self.current_click_count += 1
+        self.status_label.setText(f"기록됨 (iris: {iris_x:.3f}, {iris_y:.3f})")
+        self.status_label.setStyleSheet("font-size: 14px; color: #03DAC6;")
+
+        if self.current_click_count >= self.CLICKS_PER_POINT:
+            self.current_click_count = 0
+            self.current_point_index += 1
+            if self.current_point_index >= len(self.POINTS):
+                self._finish_calibration()
+                return
+
+        self._update_progress_text()
+        self.update()  # repaint
+
+    def _extract_iris(self, frame):
+        """로컬 MediaPipe Face Mesh로 iris 정규화 위치 추출."""
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self._face_mesh.process(image_rgb)
+        if not results.multi_face_landmarks:
+            return None
+        landmarks = results.multi_face_landmarks[0].landmark
+        h, w = frame.shape[:2]
+
+        LEFT_IRIS = [473, 474, 475, 476, 477]
+        RIGHT_IRIS = [468, 469, 470, 471, 472]
+
+        def get_point(idx):
+            lm = landmarks[idx]
+            return np.array([lm.x * w, lm.y * h])
+
+        def normalize_iris(iris_indices, inner_idx, outer_idx, top_idx, bottom_idx):
+            iris_center = np.mean([get_point(i) for i in iris_indices], axis=0)
+            inner = get_point(inner_idx)
+            outer = get_point(outer_idx)
+            top = get_point(top_idx)
+            bottom = get_point(bottom_idx)
+            eye_width = np.linalg.norm(outer - inner)
+            eye_height = np.linalg.norm(bottom - top)
+            if eye_width < 1 or eye_height < 1:
+                return 0.5, 0.5
+            eye_dir = (outer - inner) / eye_width
+            iris_vec = iris_center - inner
+            x_ratio = np.dot(iris_vec, eye_dir) / eye_width
+            eye_vdir = (bottom - top) / eye_height
+            y_ratio = np.dot(iris_center - top, eye_vdir) / eye_height
+            return float(np.clip(x_ratio, 0, 1)), float(np.clip(y_ratio, 0, 1))
+
+        lx, ly = normalize_iris(LEFT_IRIS, 362, 263, 386, 374)
+        rx, ry = normalize_iris(RIGHT_IRIS, 133, 33, 159, 145)
+        return (lx + rx) / 2, (ly + ry) / 2
+
+    def _finish_calibration(self):
+        """캘리브레이션 데이터를 gaze 서버로 전송."""
+        self.instruction_label.setText("캘리브레이션 전송 중...")
+        screen = QApplication.primaryScreen()
+        screen_size = screen.size()
+
+        ok = self.network_client.set_gaze_calibration(
+            self.calibration_data,
+            screen_size.width(),
+            screen_size.height(),
+        )
+        if ok:
+            self.status_label.setText("시선 캘리브레이션이 완료되었습니다!")
+            self.status_label.setStyleSheet("font-size: 16px; color: #03DAC6; font-weight: bold;")
+            self.instruction_label.setText("캘리브레이션 완료!")
+            QTimer.singleShot(1500, self.done_requested.emit)
+        else:
+            self.status_label.setText("서버 전송 실패 - ai_gaze 서버를 확인하세요")
+            self.status_label.setStyleSheet("font-size: 16px; color: #CF6679; font-weight: bold;")
+            self.instruction_label.setText("캘리브레이션 실패")
+
 
 
 class MonitoringPage(QWidget):
@@ -1278,8 +1744,8 @@ class HistoryPage(QWidget):
             dt = dt.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
         return dt
 
-    def load_data(self):
-        self._all_sessions = self.network_client.get_history()
+    def load_data(self, user_id=None):
+        self._all_sessions = self.network_client.get_history(user_id=user_id)
         self._apply_filter()
 
     def _apply_filter(self):
@@ -1336,35 +1802,55 @@ class MainWindow(QMainWindow):
         self.camera = Camera()
         self.network_client = NetworkClient()
         self.is_monitoring = False
-        
+        self.current_user = None
+
         # Pages Setup
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
+        # Auth pages
+        self.login_page = LoginPage(self.network_client)
+        self.register_page = RegisterPage(self.network_client)
+
         self.main_page = MainPage()
         self.calibration_page = DistanceCalibrationPage(self.camera, self.network_client)
         self.head_calibration_page = HeadPoseCalibrationPage(self.camera, self.network_client)
+        self.gaze_calibration_page = GazeCalibrationPage(self.camera, self.network_client)
         self.monitoring_page = MonitoringPage()
         self.report_page = ReportPage()
         self.report_page.set_network_client(self.network_client)
         self.analysis_page = LlmAnalysisPage(self.network_client)
         self.history_page = HistoryPage(self.network_client)
 
+        self.stack.addWidget(self.login_page)
+        self.stack.addWidget(self.register_page)
         self.stack.addWidget(self.main_page)
         self.stack.addWidget(self.calibration_page)
         self.stack.addWidget(self.head_calibration_page)
+        self.stack.addWidget(self.gaze_calibration_page)
         self.stack.addWidget(self.monitoring_page)
         self.stack.addWidget(self.report_page)
         self.stack.addWidget(self.analysis_page)
         self.stack.addWidget(self.history_page)
 
+        # Auth Signals
+        self.login_page.login_success.connect(self._on_login_success)
+        self.login_page.register_requested.connect(lambda: self.stack.setCurrentWidget(self.register_page))
+        self.register_page.register_success.connect(self._on_register_success)
+        self.register_page.back_to_login.connect(lambda: self.stack.setCurrentWidget(self.login_page))
+
         # Signals
         self.main_page.start_requested.connect(self.start_session)
         self.main_page.history_requested.connect(self.show_history)
         self.main_page.calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.calibration_page))
-        self.main_page.head_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.head_calibration_page))
+        
         self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.head_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.main_page.head_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.head_calibration_page))
+        self.main_page.gaze_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.gaze_calibration_page))
+        self.main_page.logout_requested.connect(self._on_logout)
+        self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.gaze_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.monitoring_page.stop_requested.connect(self.stop_session)
         self.monitoring_page.set_baseline_requested.connect(self._on_set_baseline_from_monitoring)
         self.report_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
@@ -1390,8 +1876,24 @@ class MainWindow(QMainWindow):
         self.distraction_count = 0
         self.current_session_id = None
 
+    def _on_login_success(self, user_data: dict):
+        self.current_user = user_data
+        self.login_page.clear_fields()
+        self.stack.setCurrentWidget(self.main_page)
+
+    def _on_register_success(self, user_data: dict):
+        self.register_page.clear_fields()
+        QMessageBox.information(self, "회원가입 완료", "계정이 생성되었습니다. 로그인해주세요.")
+        self.stack.setCurrentWidget(self.login_page)
+
+    def _on_logout(self):
+        self.current_user = None
+        self.login_page.clear_fields()
+        self.stack.setCurrentWidget(self.login_page)
+
     def start_session(self):
-        session_data = self.network_client.start_session()
+        user_id = self.current_user.get("user_id") if self.current_user else None
+        session_data = self.network_client.start_session(user_id=user_id)
         if session_data and session_data.get("session_id"):
             self.current_session_id = session_data.get("session_id")
             logger.info(f"Session started on server: {self.current_session_id}")
@@ -1438,7 +1940,8 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.analysis_page)
 
     def show_history(self):
-        self.history_page.load_data()
+        user_id = self.current_user.get("user_id") if self.current_user else None
+        self.history_page.load_data(user_id=user_id)
         self.stack.setCurrentWidget(self.history_page)
 
     def _on_set_baseline_from_monitoring(self):

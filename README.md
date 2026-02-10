@@ -41,30 +41,44 @@ graph TD
     AI_Int <--> AI_Head[AI Head Pose - Port 8001]
     AI_Int <--> AI_Emotion[AI Emotion - Port 8002]
     AI_Int <--> AI_Body[AI Upper Body - Port 8003]
+    AI_Int <--> AI_Gaze[AI Gaze Tracking - Port 8005]
     Op --- DB[(SQLite DB)]
     DB <--> LLM[LLM Server - Feedback AI]
 ```
 
 ### 🔹 레이어별 역할
-1.  **Client (PyQt6)**: 
+1.  **Client (PyQt6)**:
     *   사용자 인터페이스 제공 및 3초 주기 웹캠 이미지 캡처.
+    *   **회원가입/로그인**: 앱 실행 시 로그인 화면을 통해 사용자 인증 후 메인 화면으로 진입.
     *   **Operation Server**로 분석 요청 전송 및 결과 시각화.
     *   **최종 리포트 창**: 세션 종료 시 집중 비율, 비집중 횟수, 학습 시간 요약 출력.
-2.  **Operation Server (FastAPI)**: 
-    *   시스템의 단일 진입점(Gateway) 및 세션 관리자.
-    *   **세션 기반 데이터 관리**: `monitoring_sessions`(요약)와 `focus_logs`(로그) 테이블 분리 설계.
+2.  **Operation Server (FastAPI)**:
+    *   시스템의 단일 진입점(Gateway) 및 세션/사용자 관리자.
+    *   **사용자 관리**: `users` 테이블을 통한 회원가입/로그인 및 비밀번호 해싱(PBKDF2-SHA256).
+    *   **세션 기반 데이터 관리**: `monitoring_sessions`(요약), `focus_logs`(로그), `users`(회원) 테이블 분리 설계. 세션은 로그인한 사용자와 자동 연결.
     *   보안 인증(API Key), 사용량 제한(Rate Limit) 관리.
 3.  **AI Interface Server (FastAPI)**: 
     *   AI 오케스트레이터.
     *   여러 AI 모델 서버의 결과를 취합하여 최종 '비집중' 여부 판정 로직 수행.
-4.  **AI Models**: 
+4.  **AI Models**:
     *   **AI Head**: YOLOv8 Pose 기반 고개 각도(Pitch, Yaw, Roll) 및 타겟 추적 분석.
+    *   **AI Emotion**: 감정 인식 기반 졸림 및 비집중 상태 감지.
+    *   **AI Body**: MediaPipe Holistic 기반 자세 분석 및 거북목 감지.
+    *   **AI Gaze**: MediaPipe Face Mesh 기반 시선 추적 및 화면 이탈 감지 (9-point 캘리브레이션).
+5.  **LLM Server**:
+    *   세션 종료 후 집중도 데이터를 분석하여 개인화된 피드백 생성.
 
 ---
 
 ## 📌 주요 기능
 
+*   **회원가입/로그인**: 사용자별 계정 생성 및 인증. 모니터링 세션과 히스토리가 로그인한 사용자에 연결되어 개인별 데이터 관리 가능.
 *   **실시간 대시보드**: 현대적인 다크 테마 UI, 집중도 점수 및 변화 그래프 실시간 출력.
+*   **4중 AI 모델 통합**: 고개 방향, 감정, 자세, **시선 추적**을 병렬로 분석하여 비집중 상태 종합 판단.
+*   **시선 추적 (Gaze Tracking)**: MediaPipe Face Mesh의 iris 랜드마크를 활용한 정밀 시선 추적.
+    *   **9-point 캘리브레이션**: 화면 9개 지점을 바라보며 클릭하여 개인별 시선 매핑.
+    *   **화면 이탈 감지**: 캘리브레이션된 화면 영역을 벗어나면 자동으로 비집중 상태로 판정.
+    *   **방향 분류**: 시선 이탈 방향(좌/우/상/하) 자동 구분 및 로깅.
 *   **세션 기반 리포트**: 모니터링 종료 후 **최종 집중 비율, 비집중 원인 통계, 학습 시간** 등을 요약한 전문 리포트 화면 제공.
 *   **정밀한 상태 감지**: YOLOv8 Pose를 활용한 타겟 고정 추적 및 이탈 동작 감지.
 *   **즉각적인 알림**: 비집중 감지 시 **알림음(Beep)** 및 **화면 오버레이** 팝업.
@@ -94,11 +108,13 @@ uv add <package_name>
 ```text
 deeplearning-repo-2/
 ├── apps/
-│   ├── client/           # [UI] 사용자용 데스크탑 어플리케이션
+│   ├── client/           # [UI] 사용자용 데스크탑 어플리케이션 (PyQt6)
 │   ├── operation_server/ # [Core] 비즈니스 로직 및 SQLite DB 통합 (Port 8000)
 │   ├── ai_interface/     # [AI Core] 여러 AI 모델 결과를 집계하는 서버 (Port 8010)
 │   ├── ai_head/          # [Vision] YOLOv8 기반 Head Pose 분석 서버 (Port 8001)
 │   ├── ai_emotion/       # [Vision] 감정 분석 서버 (Port 8002)
+│   ├── ai_body/          # [Vision] MediaPipe 기반 자세 분석 서버 (Port 8003)
+│   ├── ai_gaze/          # [Vision] MediaPipe Face Mesh 기반 시선 추적 서버 (Port 8005)
 │   └── llm_server/       # [AI] Ollama 기반 피드백 생성 서버 (Port 8004)
 ├── packages/
 │   └── shared/           # [Common] 프로젝트 공통 데이터 규격 (Pydantic)
@@ -152,17 +168,27 @@ cd apps/ai_head && uv run python src/ai_head/main.py
 cd apps/ai_emotion && uv run python src/ai_emotion/main.py
 ```
 
-**3) AI Interface 서버** (Port 8010)
+**3) AI Body 서버** (Port 8003)
+```bash
+cd apps/ai_body && uv run python src/ai_body/main.py
+```
+
+**4) AI Gaze 서버** (Port 8005)
+```bash
+cd apps/ai_gaze && uv run python src/ai_gaze/main.py
+```
+
+**5) AI Interface 서버** (Port 8010)
 ```bash
 cd apps/ai_interface && uv run python src/ai_interface/main.py
 ```
 
-**4) Operation 서버** (Port 8000)
+**6) Operation 서버** (Port 8000)
 ```bash
 cd apps/operation_server && uv run python src/operation_server/main.py
 ```
 
-**5) LLM 서버** (Port 8004)
+**7) LLM 서버** (Port 8004)
 ```bash
 cd apps/llm_server && uv run python src/llm_server/main.py
 ```
@@ -179,9 +205,10 @@ uv run python src/client/main.py
 ---
 
 ## 🔒 보안 및 데이터 관리
-*   **X-API-Key**: 모든 통신은 HTTP 헤더의 API Key 인증을 통해 보호됩니다. 
+*   **사용자 인증**: 회원가입 시 비밀번호는 PBKDF2-SHA256 (100,000 iterations, 16-byte random salt)으로 해싱되어 저장됩니다. 비밀번호 검증은 `hmac.compare_digest()`를 사용하여 타이밍 공격에 안전합니다.
+*   **X-API-Key**: 서비스 간 통신은 HTTP 헤더의 API Key 인증을 통해 보호됩니다. 회원가입/로그인 엔드포인트는 API Key 없이 접근 가능합니다.
 *   **환경 변수**: 각 서비스 폴더의 `.env` 파일에 동일한 `API_KEY` 설정이 필수입니다.
-*   **SQLite DB**: 운영 서버 실행 시 `apps/operation_server/focus_monitor.db` 경로에 데이터베이스가 자동으로 생성됩니다.
+*   **SQLite DB**: 운영 서버 실행 시 `apps/operation_server/focus_monitor.db` 경로에 데이터베이스가 자동으로 생성됩니다. `users`, `monitoring_sessions`, `focus_logs` 3개 테이블로 구성됩니다.
 
 ---
 

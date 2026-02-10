@@ -14,6 +14,7 @@ class InferenceResponse(BaseModel):
     head_pose: Optional[dict] = None
     emotion: Optional[dict] = None
     body_pose: Optional[dict] = None
+    gaze_data: Optional[dict] = None
 
 class SessionStartResponse(BaseModel):
     session_id: Union[str, UUID]
@@ -57,7 +58,32 @@ class FocusLogItem(BaseModel):
     is_distracted: bool
     status_message: Optional[str] = None
     emotion_data: Optional[dict] = None
+    gaze_data: Optional[dict] = None
 
 class SessionLogsResponse(BaseModel):
     session_id: Union[str, UUID]
     logs: List[FocusLogItem]
+
+class UserRegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=128)
+    display_name: str = Field(..., min_length=1, max_length=100)
+
+class UserLoginRequest(BaseModel):
+    username: str
+    password: str
+
+class UserResponse(BaseModel):
+    user_id: int
+    username: str
+    display_name: str
+    created_at: datetime
+
+class LoginResponse(BaseModel):
+    user_id: int
+    username: str
+    display_name: str
+    message: str
+
+class SessionStartRequest(BaseModel):
+    user_id: Optional[int] = None
