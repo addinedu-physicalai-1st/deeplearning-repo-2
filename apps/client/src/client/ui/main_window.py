@@ -59,6 +59,7 @@ class MainPage(QWidget):
     start_requested = pyqtSignal()
     history_requested = pyqtSignal()
     calibration_requested = pyqtSignal()
+    gaze_calibration_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -68,7 +69,7 @@ class MainPage(QWidget):
         # Welcome Card
         card = QFrame()
         card.setObjectName("Card")
-        card.setFixedSize(500, 450)
+        card.setFixedSize(500, 520)
         card_layout = QVBoxLayout(card)
         card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.setSpacing(20)
@@ -92,6 +93,11 @@ class MainPage(QWidget):
         self.calibration_btn.setObjectName("SecondaryBtn")
         self.calibration_btn.clicked.connect(self.calibration_requested.emit)
         card_layout.addWidget(self.calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.gaze_calibration_btn = QPushButton("시선 캘리브레이션")
+        self.gaze_calibration_btn.setObjectName("SecondaryBtn")
+        self.gaze_calibration_btn.clicked.connect(self.gaze_calibration_requested.emit)
+        card_layout.addWidget(self.gaze_calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.start_btn = QPushButton("START NEW SESSION")
         self.start_btn.setObjectName("PrimaryBtn")
@@ -251,6 +257,258 @@ class DistanceCalibrationPage(QWidget):
         else:
             self.status_label.setText("ai_body 서버 연결 실패. 서버를 확인하세요.")
             self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #CF6679;")
+
+
+class GazeCalibrationPage(QWidget):
+    """9-point 시선 캘리브레이션 화면 (외부 WebGazer 코드의 개념을 PyQt로 구현)."""
+    done_requested = pyqtSignal()
+
+    POINTS = [
+        (0.05, 0.05), (0.5, 0.05), (0.95, 0.05),
+        (0.05, 0.5),  (0.5, 0.5),  (0.95, 0.5),
+        (0.05, 0.95), (0.5, 0.95), (0.95, 0.95),
+    ]
+    CLICKS_PER_POINT = 5
+
+    def __init__(self, camera: Camera, network_client: NetworkClient):
+        super().__init__()
+        self.camera = camera
+        self.network_client = network_client
+        self.calibration_data = []
+        self.current_point_index = 0
+        self.current_click_count = 0
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._update_preview)
+
+        # 로컬 MediaPipe Face Mesh (iris 추출용)
+        import mediapipe as mp_lib
+        self._mp_face_mesh = mp_lib.solutions.face_mesh
+        self._face_mesh = self._mp_face_mesh.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # 상단 안내 영역
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(20, 10, 20, 10)
+
+        self.instruction_label = QLabel("빨간 점을 바라보며 클릭하세요")
+        self.instruction_label.setStyleSheet("font-size: 18px; color: #BB86FC; font-weight: bold;")
+        top_bar.addWidget(self.instruction_label)
+        top_bar.addStretch()
+
+        self.progress_label = QLabel("포인트 1/9 - 클릭 0/5")
+        self.progress_label.setStyleSheet("font-size: 16px; color: #03DAC6;")
+        top_bar.addWidget(self.progress_label)
+
+        layout.addLayout(top_bar)
+
+        # 캘리브레이션 영역 (클릭 가능, 빨간점 표시)
+        self.calib_area = QWidget()
+        self.calib_area.setStyleSheet("background-color: #121212;")
+        self.calib_area.setMouseTracking(False)
+        layout.addWidget(self.calib_area, stretch=1)
+
+        # 하단 상태/컨트롤 영역
+        bottom_bar = QHBoxLayout()
+        bottom_bar.setContentsMargins(20, 10, 20, 10)
+
+        self.status_label = QLabel("준비됨")
+        self.status_label.setStyleSheet("font-size: 14px; color: #9E9E9E;")
+        bottom_bar.addWidget(self.status_label)
+        bottom_bar.addStretch()
+
+        self.video_label = QLabel()
+        self.video_label.setFixedSize(160, 120)
+        self.video_label.setStyleSheet("border: 1px solid #333; background-color: black;")
+        bottom_bar.addWidget(self.video_label)
+
+        cancel_btn = QPushButton("취소")
+        cancel_btn.setObjectName("SecondaryBtn")
+        cancel_btn.clicked.connect(self.done_requested.emit)
+        bottom_bar.addWidget(cancel_btn)
+
+        layout.addLayout(bottom_bar)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._reset_calibration()
+        self.timer.start(33)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.timer.stop()
+
+    def _reset_calibration(self):
+        self.calibration_data = []
+        self.current_point_index = 0
+        self.current_click_count = 0
+        self._update_progress_text()
+        self.status_label.setText("준비됨")
+        self.status_label.setStyleSheet("font-size: 14px; color: #9E9E9E;")
+
+    def _update_progress_text(self):
+        if self.current_point_index < len(self.POINTS):
+            self.progress_label.setText(
+                f"포인트 {self.current_point_index + 1}/{len(self.POINTS)} - "
+                f"클릭 {self.current_click_count}/{self.CLICKS_PER_POINT}"
+            )
+        else:
+            self.progress_label.setText("캘리브레이션 완료")
+
+    def _update_preview(self):
+        """작은 카메라 미리보기 업데이트."""
+        frame = self.camera.get_frame()
+        if frame is None:
+            return
+        frame_mirror = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame_mirror, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        qt_img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+        self.video_label.setPixmap(QPixmap.fromImage(qt_img).scaled(
+            160, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    def paintEvent(self, event):
+        """현재 캘리브레이션 포인트를 빨간 점으로 표시."""
+        super().paintEvent(event)
+        if self.current_point_index >= len(self.POINTS):
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rx, ry = self.POINTS[self.current_point_index]
+        x = int(self.width() * rx)
+        y = int(self.height() * ry)
+
+        # 외부 코드 스타일: 빨간 점 + 흰 테두리
+        painter.setPen(QPen(QColor("white"), 3))
+        painter.setBrush(QBrush(QColor(207, 102, 121)))  # #CF6679
+        painter.drawEllipse(x - 15, y - 15, 30, 30)
+
+        # 클릭 진행도 (작은 원으로 표시)
+        for i in range(self.current_click_count):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor("#03DAC6")))
+            offset_x = x - 12 + i * 6
+            painter.drawEllipse(offset_x, y + 20, 5, 5)
+
+        painter.end()
+
+    def mousePressEvent(self, event):
+        """캘리브레이션 클릭 처리: iris 위치 추출 + 화면 좌표 기록."""
+        if self.current_point_index >= len(self.POINTS):
+            return
+
+        frame = self.camera.get_frame()
+        if frame is None:
+            self.status_label.setText("카메라 프레임을 가져올 수 없습니다")
+            self.status_label.setStyleSheet("font-size: 14px; color: #CF6679;")
+            return
+
+        iris_pos = self._extract_iris(frame)
+        if iris_pos is None:
+            self.status_label.setText("얼굴이 감지되지 않습니다 - 카메라를 바라보세요")
+            self.status_label.setStyleSheet("font-size: 14px; color: #FFB74D;")
+            return
+
+        iris_x, iris_y = iris_pos
+        rx, ry = self.POINTS[self.current_point_index]
+
+        # 실제 화면 해상도 기준 좌표 (캘리브레이션은 전체 화면 좌표 필요)
+        screen = QApplication.primaryScreen()
+        screen_size = screen.size()
+        screen_x = screen_size.width() * rx
+        screen_y = screen_size.height() * ry
+
+        self.calibration_data.append({
+            "iris_x": iris_x,
+            "iris_y": iris_y,
+            "screen_x": screen_x,
+            "screen_y": screen_y,
+        })
+
+        self.current_click_count += 1
+        self.status_label.setText(f"기록됨 (iris: {iris_x:.3f}, {iris_y:.3f})")
+        self.status_label.setStyleSheet("font-size: 14px; color: #03DAC6;")
+
+        if self.current_click_count >= self.CLICKS_PER_POINT:
+            self.current_click_count = 0
+            self.current_point_index += 1
+            if self.current_point_index >= len(self.POINTS):
+                self._finish_calibration()
+                return
+
+        self._update_progress_text()
+        self.update()  # repaint
+
+    def _extract_iris(self, frame):
+        """로컬 MediaPipe Face Mesh로 iris 정규화 위치 추출."""
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self._face_mesh.process(image_rgb)
+        if not results.multi_face_landmarks:
+            return None
+        landmarks = results.multi_face_landmarks[0].landmark
+        h, w = frame.shape[:2]
+
+        LEFT_IRIS = [473, 474, 475, 476, 477]
+        RIGHT_IRIS = [468, 469, 470, 471, 472]
+
+        def get_point(idx):
+            lm = landmarks[idx]
+            return np.array([lm.x * w, lm.y * h])
+
+        def normalize_iris(iris_indices, inner_idx, outer_idx, top_idx, bottom_idx):
+            iris_center = np.mean([get_point(i) for i in iris_indices], axis=0)
+            inner = get_point(inner_idx)
+            outer = get_point(outer_idx)
+            top = get_point(top_idx)
+            bottom = get_point(bottom_idx)
+            eye_width = np.linalg.norm(outer - inner)
+            eye_height = np.linalg.norm(bottom - top)
+            if eye_width < 1 or eye_height < 1:
+                return 0.5, 0.5
+            eye_dir = (outer - inner) / eye_width
+            iris_vec = iris_center - inner
+            x_ratio = np.dot(iris_vec, eye_dir) / eye_width
+            eye_vdir = (bottom - top) / eye_height
+            y_ratio = np.dot(iris_center - top, eye_vdir) / eye_height
+            return float(np.clip(x_ratio, 0, 1)), float(np.clip(y_ratio, 0, 1))
+
+        lx, ly = normalize_iris(LEFT_IRIS, 362, 263, 386, 374)
+        rx, ry = normalize_iris(RIGHT_IRIS, 133, 33, 159, 145)
+        return (lx + rx) / 2, (ly + ry) / 2
+
+    def _finish_calibration(self):
+        """캘리브레이션 데이터를 gaze 서버로 전송."""
+        self.instruction_label.setText("캘리브레이션 전송 중...")
+        screen = QApplication.primaryScreen()
+        screen_size = screen.size()
+
+        ok = self.network_client.set_gaze_calibration(
+            self.calibration_data,
+            screen_size.width(),
+            screen_size.height(),
+        )
+        if ok:
+            self.status_label.setText("시선 캘리브레이션이 완료되었습니다!")
+            self.status_label.setStyleSheet("font-size: 16px; color: #03DAC6; font-weight: bold;")
+            self.instruction_label.setText("캘리브레이션 완료!")
+            QTimer.singleShot(1500, self.done_requested.emit)
+        else:
+            self.status_label.setText("서버 전송 실패 - ai_gaze 서버를 확인하세요")
+            self.status_label.setStyleSheet("font-size: 16px; color: #CF6679; font-weight: bold;")
+            self.instruction_label.setText("캘리브레이션 실패")
 
 
 class MonitoringPage(QWidget):
@@ -1096,6 +1354,7 @@ class MainWindow(QMainWindow):
 
         self.main_page = MainPage()
         self.calibration_page = DistanceCalibrationPage(self.camera, self.network_client)
+        self.gaze_calibration_page = GazeCalibrationPage(self.camera, self.network_client)
         self.monitoring_page = MonitoringPage()
         self.report_page = ReportPage()
         self.report_page.set_network_client(self.network_client)
@@ -1104,6 +1363,7 @@ class MainWindow(QMainWindow):
 
         self.stack.addWidget(self.main_page)
         self.stack.addWidget(self.calibration_page)
+        self.stack.addWidget(self.gaze_calibration_page)
         self.stack.addWidget(self.monitoring_page)
         self.stack.addWidget(self.report_page)
         self.stack.addWidget(self.analysis_page)
@@ -1113,7 +1373,9 @@ class MainWindow(QMainWindow):
         self.main_page.start_requested.connect(self.start_session)
         self.main_page.history_requested.connect(self.show_history)
         self.main_page.calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.calibration_page))
+        self.main_page.gaze_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.gaze_calibration_page))
         self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.gaze_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.monitoring_page.stop_requested.connect(self.stop_session)
         self.monitoring_page.set_baseline_requested.connect(self._on_set_baseline_from_monitoring)
         self.report_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))

@@ -67,6 +67,7 @@ async def get_api_key(header_api_key: str = Depends(api_key_header)):
 AI_HEAD_URL = os.getenv("AI_HEAD_URL", "http://localhost:8001/inference")
 AI_EMOTION_URL = os.getenv("AI_EMOTION_URL", "http://localhost:8002/inference")
 AI_BODY_URL = os.getenv("AI_BODY_URL", "http://localhost:8003/inference")
+AI_GAZE_URL = os.getenv("AI_GAZE_URL", "http://localhost:8005/inference")
 
 # Operation Server (세션/로그 조회) & LLM Server (피드백 생성)
 OPERATION_SERVER_URL = os.getenv("OPERATION_SERVER_URL", "http://localhost:8000").rstrip("/")
@@ -279,14 +280,14 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 call_ai_server(client, AI_HEAD_URL, request),
                 call_ai_server(client, AI_EMOTION_URL, request),
                 call_ai_server(client, AI_BODY_URL, request),
-                # call_ai_server(client, AI_GAZE_URL, request),
+                call_ai_server(client, AI_GAZE_URL, request),
             ]
             
             results = await asyncio.gather(*tasks)
             head_result = results[0]
             emotion_result = results[1]
             body_result = results[2]
-            # gaze_result = results[3]
+            gaze_result = results[3]
 
             # Basic Error Handling for the required model
             if "error" in head_result:
@@ -307,17 +308,18 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 body_result = None
 
             # Error Handling for gaze server (graceful degradation)
-            # if "error" in gaze_result:
-            #     logger.warning(f"Gaze server error: {gaze_result.get('error')}")
-            #     gaze_result = None
+            if "error" in gaze_result:
+                logger.warning(f"Gaze server error: {gaze_result.get('error')}")
+                gaze_result = None
 
             # Final Orchestration Logic (Rule-based)
             head_distracted = head_result.get("is_distracted", False)
             emotion_distracted = emotion_result.get("is_distracted", False) if emotion_result else False
             body_distracted = body_result.get("is_distracted", False) if body_result else False
+            gaze_distracted = gaze_result.get("is_distracted", False) if gaze_result else False
 
-            # 셋 중 하나라도 True이면 최종적으로 집중하지 않은 것으로 판단
-            is_distracted = head_distracted or emotion_distracted or body_distracted
+            # 하나라도 True이면 최종적으로 집중하지 않은 것으로 판단
+            is_distracted = head_distracted or emotion_distracted or body_distracted or gaze_distracted
 
     ###################################################################################################
             # # Orchestration Logic
@@ -395,6 +397,8 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                     messages.append(emotion_result.get("status_message", "Emotion issue"))
                 if body_distracted and body_result:
                     messages.append(body_result.get("status_message", "Body posture issue"))
+                if gaze_distracted and gaze_result:
+                    messages.append(gaze_result.get("status_message", "Gaze issue"))
                 status_message = " | ".join(messages) if messages else "Distracted"
             else:
                 status_message = "Focused"
@@ -404,7 +408,8 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 status_message=status_message,
                 head_pose=head_result.get("head_pose"),
                 emotion=emotion_result.get("emotion") if emotion_result else None,
-                body_pose=body_result.get("body_pose") if body_result else None
+                body_pose=body_result.get("body_pose") if body_result else None,
+                gaze_data=gaze_result.get("gaze_data") if gaze_result else None
             )
         except Exception as e:
             logger.exception("Internal Error in AI Interface")

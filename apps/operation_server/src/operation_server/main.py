@@ -45,6 +45,18 @@ try:
 except Exception as e:
     logging.warning(f"Migration posture_alert: {e}")
 
+# Add gaze_data column to focus_logs if missing
+try:
+    if "sqlite" in str(engine.url):
+        with engine.connect() as conn:
+            r = conn.execute(text("PRAGMA table_info(focus_logs)"))
+            cols = [row[1] for row in r]
+        if "gaze_data" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE focus_logs ADD COLUMN gaze_data JSON"))
+except Exception as e:
+    logging.warning(f"Migration gaze_data: {e}")
+
 load_dotenv()
 
 # Logging setup
@@ -73,16 +85,23 @@ if not API_KEY:
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
+async def get_api_key(header_api_key: str = Depends(api_key_header)):
+    if header_api_key and secrets.compare_digest(header_api_key, API_KEY):
+        return header_api_key
+    raise HTTPException(
+        status_code=HTTP_403_FORBIDDEN, detail="인증 정보를 확인할 수 없습니다"
+    )
+
 # Service URLs (AI_INTERFACE_URL is base e.g. http://localhost:8010; inference = base + /inference)
 AI_INTERFACE_BASE = (os.getenv("AI_INTERFACE_URL", "http://localhost:8010").rstrip("/").replace("/inference", "") or "http://localhost:8010")
 LLM_SERVER_URL = os.getenv("LLM_SERVER_URL", "http://localhost:8004/feedback")
 
 @app.get("/health")
-async def health_check(api_key: str = Depends(api_key_header)):
+async def health_check():
     return {"status": "ok", "service": "operation_server"}
 
 @app.post("/sessions/start", response_model=SessionStartResponse)
-async def start_session(api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+async def start_session(api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     new_session = models.MonitoringSession()
     db.add(new_session)
     db.commit()
@@ -90,7 +109,7 @@ async def start_session(api_key: str = Depends(api_key_header), db: Session = De
     return SessionStartResponse(session_id=new_session.id, start_time=new_session.start_time)
 
 @app.get("/sessions/{session_id}", response_model=SessionSummary)
-async def get_session(session_id: str, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+async def get_session(session_id: str, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     """단일 세션 조회 (AI Interface가 세션 요약 조회 시 사용)."""
     session = db.query(models.MonitoringSession).filter(models.MonitoringSession.id == session_id).first()
     if not session:
@@ -106,7 +125,7 @@ async def get_session(session_id: str, api_key: str = Depends(api_key_header), d
     )
 
 @app.get("/sessions", response_model=List[SessionSummary])
-async def get_sessions(api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+async def get_sessions(api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     sessions = db.query(models.MonitoringSession).filter(models.MonitoringSession.end_time != None).order_by(models.MonitoringSession.start_time.desc()).all()
     kst = ZoneInfo("Asia/Seoul")
     return [
@@ -121,7 +140,7 @@ async def get_sessions(api_key: str = Depends(api_key_header), db: Session = Dep
     ]
 
 @app.post("/sessions/stop/{session_id}", response_model=SessionSummary)
-async def stop_session(session_id: str, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+async def stop_session(session_id: str, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     session = db.query(models.MonitoringSession).filter(models.MonitoringSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -151,7 +170,7 @@ async def stop_session(session_id: str, api_key: str = Depends(api_key_header), 
     )
 
 @app.get("/sessions/{session_id}/logs", response_model=SessionLogsResponse)
-async def get_session_logs(session_id: str, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+async def get_session_logs(session_id: str, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     """세션의 모든 로그 데이터를 반환"""
     session = db.query(models.MonitoringSession).filter(models.MonitoringSession.id == session_id).first()
     if not session:
@@ -174,7 +193,8 @@ async def get_session_logs(session_id: str, api_key: str = Depends(api_key_heade
             timestamp=log.timestamp,
             is_distracted=log.is_distracted,
             status_message=log.status_message,
-            emotion_data=_normalize_emotion_data(log.emotion_data)
+            emotion_data=_normalize_emotion_data(log.emotion_data),
+            gaze_data=log.gaze_data if hasattr(log, 'gaze_data') else None
         ) for log in logs
     ]
     
@@ -184,7 +204,7 @@ async def get_session_logs(session_id: str, api_key: str = Depends(api_key_heade
     )
 
 @app.post("/sessions/{session_id}/feedback")
-async def generate_session_feedback(session_id: str, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+async def generate_session_feedback(session_id: str, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     """클라이언트가 호출. AI Interface로 위임 후 llm_comment 저장·반환."""
     session = db.query(models.MonitoringSession).filter(models.MonitoringSession.id == session_id).first()
     if not session:
@@ -216,7 +236,7 @@ async def generate_session_feedback(session_id: str, api_key: str = Depends(api_
         raise HTTPException(status_code=500, detail="LLM 분석 중 오류가 발생했습니다.")
 
 @app.post("/inference", response_model=InferenceResponse)
-async def inference(request: InferenceRequest, api_key: str = Depends(api_key_header), db: Session = Depends(get_db)):
+async def inference(request: InferenceRequest, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     async with httpx.AsyncClient() as client:
         try:
             headers = {API_KEY_NAME: API_KEY}
@@ -232,6 +252,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(api_key_he
                 head_pose_data=ai_result.get('head_pose'),
                 emotion_data=ai_result.get('emotion'),
                 body_pose_data=ai_result.get('body_pose'),
+                gaze_data=ai_result.get('gaze_data'),
                 posture_alert=body_pose.get('posture_alert', False),
             )
             db.add(new_log)

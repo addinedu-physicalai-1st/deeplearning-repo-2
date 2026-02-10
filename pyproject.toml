@@ -18,6 +18,7 @@ members = [
     "apps/ai_head",
     "apps/ai_emotion",
     "apps/ai_body",
+    "apps/ai_gaze",
     "apps/llm_server",
     "packages/shared",
 ]

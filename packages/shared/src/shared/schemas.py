@@ -14,6 +14,7 @@ class InferenceResponse(BaseModel):
     head_pose: Optional[dict] = None
     emotion: Optional[dict] = None
     body_pose: Optional[dict] = None
+    gaze_data: Optional[dict] = None
 
 class SessionStartResponse(BaseModel):
     session_id: Union[str, UUID]
@@ -57,6 +58,7 @@ class FocusLogItem(BaseModel):
     is_distracted: bool
     status_message: Optional[str] = None
     emotion_data: Optional[dict] = None
+    gaze_data: Optional[dict] = None
 
 class SessionLogsResponse(BaseModel):
     session_id: Union[str, UUID]

@@ -31,6 +31,11 @@ APPS = {
         "port": 8003,
         "cmd": ["uv", "run", "python", "src/ai_body/main.py"]
     },
+    "ai_gaze": {
+        "path": "apps/ai_gaze",
+        "port": 8005,
+        "cmd": ["uv", "run", "python", "src/ai_gaze/main.py"]
+    },
     "llm_server": {
         "path": "apps/llm_server",
         "port": 8004,

@@ -8,10 +8,11 @@ from shared.schemas import InferenceRequest, InferenceResponse
 logger = logging.getLogger(__name__)
 
 class NetworkClient:
-    def __init__(self, operation_url=None, api_key=None, ai_body_url=None):
+    def __init__(self, operation_url=None, api_key=None, ai_body_url=None, ai_gaze_url=None):
         self.operation_url = operation_url or os.getenv("OPERATION_SERVER_URL", "http://localhost:8000/inference")
         self.api_key = api_key or os.getenv("API_KEY")
         self.ai_body_url = (ai_body_url or os.getenv("AI_BODY_URL", "http://localhost:8003")).rstrip("/")
+        self.ai_gaze_url = (ai_gaze_url or os.getenv("AI_GAZE_URL", "http://localhost:8005")).rstrip("/")
 
         if not self.api_key:
             logger.warning("API_KEY is not set. Requests will likely fail.")
@@ -98,6 +99,23 @@ class NetworkClient:
         except Exception as e:
             logger.error(f"Error requesting LLM feedback: {e}")
             return None
+
+    def set_gaze_calibration(self, calibration_points: list, screen_width: int, screen_height: int) -> bool:
+        """POST calibration data to ai_gaze /set_calibration."""
+        url = f"{self.ai_gaze_url}/set_calibration"
+        payload = {
+            "points": calibration_points,
+            "screen_width": screen_width,
+            "screen_height": screen_height,
+        }
+        headers = {"X-API-Key": self.api_key, "Content-Type": "application/json"}
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=5, verify=True)
+            response.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Error sending gaze calibration: {e}")
+            return False
 
     def set_baseline(self, image_base64: str) -> bool:
         """POST current frame to ai_body /set_baseline. Returns True on success."""
