@@ -17,6 +17,44 @@ class NetworkClient:
         if not self.api_key:
             logger.warning("API_KEY is not set. Requests will likely fail.")
 
+    def register(self, username: str, password: str, display_name: str) -> dict:
+        url = self.operation_url.replace("/inference", "/auth/register")
+        try:
+            response = requests.post(
+                url,
+                json={"username": username, "password": password, "display_name": display_name},
+                timeout=5, verify=True
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 409:
+                return {"error": "duplicate", "detail": e.response.json().get("detail", "")}
+            logger.error(f"Error registering: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error registering: {e}")
+            return None
+
+    def login(self, username: str, password: str) -> dict:
+        url = self.operation_url.replace("/inference", "/auth/login")
+        try:
+            response = requests.post(
+                url,
+                json={"username": username, "password": password},
+                timeout=5, verify=True
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 401:
+                return {"error": "invalid_credentials", "detail": e.response.json().get("detail", "")}
+            logger.error(f"Error logging in: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error logging in: {e}")
+            return None
+
     def send_inference_request(self, image_base64: str, session_id: str = None) -> InferenceResponse:
         payload = InferenceRequest(image_base64=image_base64, session_id=session_id)
         headers = {"X-API-Key": self.api_key}
@@ -34,11 +72,14 @@ class NetworkClient:
             logger.error(f"Error sending request: {e}")
             return InferenceResponse(is_distracted=False, status_message="Connection Error")
 
-    def start_session(self) -> dict:
+    def start_session(self, user_id: int = None) -> dict:
         url = self.operation_url.replace("/inference", "/sessions/start")
         headers = {"X-API-Key": self.api_key}
+        payload = {}
+        if user_id is not None:
+            payload["user_id"] = user_id
         try:
-            response = requests.post(url, headers=headers, timeout=5, verify=True)
+            response = requests.post(url, json=payload, headers=headers, timeout=5, verify=True)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -66,11 +107,14 @@ class NetworkClient:
         except:
             return False
 
-    def get_history(self) -> list:
+    def get_history(self, user_id: int = None) -> list:
         url = self.operation_url.replace("/inference", "/sessions")
         headers = {"X-API-Key": self.api_key}
+        params = {}
+        if user_id is not None:
+            params["user_id"] = user_id
         try:
-            response = requests.get(url, headers=headers, timeout=5, verify=True)
+            response = requests.get(url, headers=headers, params=params, timeout=5, verify=True)
             response.raise_for_status()
             return response.json()
         except Exception as e:

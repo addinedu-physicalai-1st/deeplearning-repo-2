@@ -63,3 +63,27 @@ class FocusLogItem(BaseModel):
 class SessionLogsResponse(BaseModel):
     session_id: Union[str, UUID]
     logs: List[FocusLogItem]
+
+class UserRegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=128)
+    display_name: str = Field(..., min_length=1, max_length=100)
+
+class UserLoginRequest(BaseModel):
+    username: str
+    password: str
+
+class UserResponse(BaseModel):
+    user_id: int
+    username: str
+    display_name: str
+    created_at: datetime
+
+class LoginResponse(BaseModel):
+    user_id: int
+    username: str
+    display_name: str
+    message: str
+
+class SessionStartRequest(BaseModel):
+    user_id: Optional[int] = None

@@ -47,13 +47,15 @@ graph TD
 ```
 
 ### 🔹 레이어별 역할
-1.  **Client (PyQt6)**: 
+1.  **Client (PyQt6)**:
     *   사용자 인터페이스 제공 및 3초 주기 웹캠 이미지 캡처.
+    *   **회원가입/로그인**: 앱 실행 시 로그인 화면을 통해 사용자 인증 후 메인 화면으로 진입.
     *   **Operation Server**로 분석 요청 전송 및 결과 시각화.
     *   **최종 리포트 창**: 세션 종료 시 집중 비율, 비집중 횟수, 학습 시간 요약 출력.
-2.  **Operation Server (FastAPI)**: 
-    *   시스템의 단일 진입점(Gateway) 및 세션 관리자.
-    *   **세션 기반 데이터 관리**: `monitoring_sessions`(요약)와 `focus_logs`(로그) 테이블 분리 설계.
+2.  **Operation Server (FastAPI)**:
+    *   시스템의 단일 진입점(Gateway) 및 세션/사용자 관리자.
+    *   **사용자 관리**: `users` 테이블을 통한 회원가입/로그인 및 비밀번호 해싱(PBKDF2-SHA256).
+    *   **세션 기반 데이터 관리**: `monitoring_sessions`(요약), `focus_logs`(로그), `users`(회원) 테이블 분리 설계. 세션은 로그인한 사용자와 자동 연결.
     *   보안 인증(API Key), 사용량 제한(Rate Limit) 관리.
 3.  **AI Interface Server (FastAPI)**: 
     *   AI 오케스트레이터.
@@ -70,6 +72,7 @@ graph TD
 
 ## 📌 주요 기능
 
+*   **회원가입/로그인**: 사용자별 계정 생성 및 인증. 모니터링 세션과 히스토리가 로그인한 사용자에 연결되어 개인별 데이터 관리 가능.
 *   **실시간 대시보드**: 현대적인 다크 테마 UI, 집중도 점수 및 변화 그래프 실시간 출력.
 *   **4중 AI 모델 통합**: 고개 방향, 감정, 자세, **시선 추적**을 병렬로 분석하여 비집중 상태 종합 판단.
 *   **시선 추적 (Gaze Tracking)**: MediaPipe Face Mesh의 iris 랜드마크를 활용한 정밀 시선 추적.
@@ -202,9 +205,10 @@ uv run python src/client/main.py
 ---
 
 ## 🔒 보안 및 데이터 관리
-*   **X-API-Key**: 모든 통신은 HTTP 헤더의 API Key 인증을 통해 보호됩니다. 
+*   **사용자 인증**: 회원가입 시 비밀번호는 PBKDF2-SHA256 (100,000 iterations, 16-byte random salt)으로 해싱되어 저장됩니다. 비밀번호 검증은 `hmac.compare_digest()`를 사용하여 타이밍 공격에 안전합니다.
+*   **X-API-Key**: 서비스 간 통신은 HTTP 헤더의 API Key 인증을 통해 보호됩니다. 회원가입/로그인 엔드포인트는 API Key 없이 접근 가능합니다.
 *   **환경 변수**: 각 서비스 폴더의 `.env` 파일에 동일한 `API_KEY` 설정이 필수입니다.
-*   **SQLite DB**: 운영 서버 실행 시 `apps/operation_server/focus_monitor.db` 경로에 데이터베이스가 자동으로 생성됩니다.
+*   **SQLite DB**: 운영 서버 실행 시 `apps/operation_server/focus_monitor.db` 경로에 데이터베이스가 자동으로 생성됩니다. `users`, `monitoring_sessions`, `focus_logs` 3개 테이블로 구성됩니다.
 
 ---
 

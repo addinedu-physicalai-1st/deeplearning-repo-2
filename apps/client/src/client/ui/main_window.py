@@ -6,7 +6,7 @@ import logging
 import numpy as np
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication,
-                             QProgressBar, QDateEdit, QScrollArea)
+                             QProgressBar, QDateEdit, QScrollArea, QLineEdit)
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QRectF, QEasingCurve, QDate
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont, QPainter, QPen, QBrush, QPainterPath
 import pyqtgraph as pg
@@ -43,6 +43,201 @@ STYLE_SHEET = """
     }
 """
 
+INPUT_STYLE = """
+    QLineEdit {
+        background-color: #2D2D2D; color: #E0E0E0; border: 1px solid #555;
+        border-radius: 8px; padding: 12px; font-size: 14px;
+    }
+    QLineEdit:focus { border: 1px solid #BB86FC; }
+"""
+
+class LoginPage(QWidget):
+    login_success = pyqtSignal(dict)
+    register_requested = pyqtSignal()
+
+    def __init__(self, network_client):
+        super().__init__()
+        self.network_client = network_client
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QFrame()
+        card.setObjectName("Card")
+        card.setFixedSize(420, 480)
+        card_layout = QVBoxLayout(card)
+        card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.setSpacing(16)
+        card_layout.setContentsMargins(40, 40, 40, 40)
+
+        title = QLabel("FOCUS MONITOR")
+        title.setObjectName("Title")
+        card_layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        subtitle = QLabel("로그인하여 시작하세요")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("font-size: 14px; color: #9E9E9E;")
+        card_layout.addWidget(subtitle)
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("아이디")
+        self.username_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.username_input)
+
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("비밀번호")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.password_input)
+
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #CF6679; font-size: 12px;")
+        self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.error_label.hide()
+        card_layout.addWidget(self.error_label)
+
+        login_btn = QPushButton("LOGIN")
+        login_btn.setObjectName("PrimaryBtn")
+        login_btn.clicked.connect(self._on_login)
+        card_layout.addWidget(login_btn)
+
+        register_btn = QPushButton("CREATE ACCOUNT")
+        register_btn.setObjectName("SecondaryBtn")
+        register_btn.clicked.connect(self.register_requested.emit)
+        card_layout.addWidget(register_btn)
+
+        layout.addWidget(card)
+
+        self.password_input.returnPressed.connect(self._on_login)
+
+    def _on_login(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        if not username or not password:
+            self.error_label.setText("아이디와 비밀번호를 입력해주세요.")
+            self.error_label.show()
+            return
+        result = self.network_client.login(username, password)
+        if result and "error" not in result:
+            self.error_label.hide()
+            self.login_success.emit(result)
+        elif result and result.get("error") == "invalid_credentials":
+            self.error_label.setText(result.get("detail", "아이디 또는 비밀번호가 올바르지 않습니다."))
+            self.error_label.show()
+        else:
+            self.error_label.setText("서버 연결 오류")
+            self.error_label.show()
+
+    def clear_fields(self):
+        self.username_input.clear()
+        self.password_input.clear()
+        self.error_label.hide()
+
+
+class RegisterPage(QWidget):
+    register_success = pyqtSignal(dict)
+    back_to_login = pyqtSignal()
+
+    def __init__(self, network_client):
+        super().__init__()
+        self.network_client = network_client
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        card = QFrame()
+        card.setObjectName("Card")
+        card.setFixedSize(420, 560)
+        card_layout = QVBoxLayout(card)
+        card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.setSpacing(14)
+        card_layout.setContentsMargins(40, 30, 40, 30)
+
+        title = QLabel("회원가입")
+        title.setObjectName("Title")
+        card_layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("아이디 (3자 이상)")
+        self.username_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.username_input)
+
+        self.display_name_input = QLineEdit()
+        self.display_name_input.setPlaceholderText("이름")
+        self.display_name_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.display_name_input)
+
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("비밀번호 (6자 이상)")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.password_input)
+
+        self.password_confirm_input = QLineEdit()
+        self.password_confirm_input.setPlaceholderText("비밀번호 확인")
+        self.password_confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_confirm_input.setStyleSheet(INPUT_STYLE)
+        card_layout.addWidget(self.password_confirm_input)
+
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #CF6679; font-size: 12px;")
+        self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.error_label.setWordWrap(True)
+        self.error_label.hide()
+        card_layout.addWidget(self.error_label)
+
+        register_btn = QPushButton("REGISTER")
+        register_btn.setObjectName("PrimaryBtn")
+        register_btn.clicked.connect(self._on_register)
+        card_layout.addWidget(register_btn)
+
+        back_btn = QPushButton("BACK TO LOGIN")
+        back_btn.setObjectName("SecondaryBtn")
+        back_btn.clicked.connect(self.back_to_login.emit)
+        card_layout.addWidget(back_btn)
+
+        layout.addWidget(card)
+
+    def _on_register(self):
+        username = self.username_input.text().strip()
+        display_name = self.display_name_input.text().strip()
+        password = self.password_input.text()
+        confirm = self.password_confirm_input.text()
+
+        if not username or not display_name or not password:
+            self.error_label.setText("모든 항목을 입력해주세요.")
+            self.error_label.show()
+            return
+        if len(username) < 3:
+            self.error_label.setText("아이디는 3자 이상이어야 합니다.")
+            self.error_label.show()
+            return
+        if len(password) < 6:
+            self.error_label.setText("비밀번호는 6자 이상이어야 합니다.")
+            self.error_label.show()
+            return
+        if password != confirm:
+            self.error_label.setText("비밀번호가 일치하지 않습니다.")
+            self.error_label.show()
+            return
+
+        result = self.network_client.register(username, password, display_name)
+        if result and "error" not in result:
+            self.error_label.hide()
+            self.register_success.emit(result)
+        elif result and result.get("error") == "duplicate":
+            self.error_label.setText(result.get("detail", "이미 사용 중인 아이디입니다."))
+            self.error_label.show()
+        else:
+            self.error_label.setText("서버 연결 오류")
+            self.error_label.show()
+
+    def clear_fields(self):
+        self.username_input.clear()
+        self.display_name_input.clear()
+        self.password_input.clear()
+        self.password_confirm_input.clear()
+        self.error_label.hide()
+
+
 class InferenceThread(QThread):
     result_ready = pyqtSignal(object)
     def __init__(self, network_client, image_base64, session_id=None):
@@ -60,6 +255,7 @@ class MainPage(QWidget):
     history_requested = pyqtSignal()
     calibration_requested = pyqtSignal()
     gaze_calibration_requested = pyqtSignal()
+    logout_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -110,6 +306,15 @@ class MainPage(QWidget):
         self.history_btn.setObjectName("SecondaryBtn")
         self.history_btn.clicked.connect(self.history_requested.emit)
         card_layout.addWidget(self.history_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.logout_btn = QPushButton("LOGOUT")
+        self.logout_btn.setStyleSheet(
+            "QPushButton { background-color: transparent; color: #9E9E9E; "
+            "font-size: 13px; border: none; padding: 8px; }"
+            "QPushButton:hover { color: #CF6679; }"
+        )
+        self.logout_btn.clicked.connect(self.logout_requested.emit)
+        card_layout.addWidget(self.logout_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(card)
 
@@ -1289,8 +1494,8 @@ class HistoryPage(QWidget):
             dt = dt.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
         return dt
 
-    def load_data(self):
-        self._all_sessions = self.network_client.get_history()
+    def load_data(self, user_id=None):
+        self._all_sessions = self.network_client.get_history(user_id=user_id)
         self._apply_filter()
 
     def _apply_filter(self):
@@ -1347,10 +1552,15 @@ class MainWindow(QMainWindow):
         self.camera = Camera()
         self.network_client = NetworkClient()
         self.is_monitoring = False
-        
+        self.current_user = None
+
         # Pages Setup
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
+
+        # Auth pages
+        self.login_page = LoginPage(self.network_client)
+        self.register_page = RegisterPage(self.network_client)
 
         self.main_page = MainPage()
         self.calibration_page = DistanceCalibrationPage(self.camera, self.network_client)
@@ -1361,6 +1571,8 @@ class MainWindow(QMainWindow):
         self.analysis_page = LlmAnalysisPage(self.network_client)
         self.history_page = HistoryPage(self.network_client)
 
+        self.stack.addWidget(self.login_page)
+        self.stack.addWidget(self.register_page)
         self.stack.addWidget(self.main_page)
         self.stack.addWidget(self.calibration_page)
         self.stack.addWidget(self.gaze_calibration_page)
@@ -1369,11 +1581,18 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.analysis_page)
         self.stack.addWidget(self.history_page)
 
+        # Auth Signals
+        self.login_page.login_success.connect(self._on_login_success)
+        self.login_page.register_requested.connect(lambda: self.stack.setCurrentWidget(self.register_page))
+        self.register_page.register_success.connect(self._on_register_success)
+        self.register_page.back_to_login.connect(lambda: self.stack.setCurrentWidget(self.login_page))
+
         # Signals
         self.main_page.start_requested.connect(self.start_session)
         self.main_page.history_requested.connect(self.show_history)
         self.main_page.calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.calibration_page))
         self.main_page.gaze_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.gaze_calibration_page))
+        self.main_page.logout_requested.connect(self._on_logout)
         self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.gaze_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.monitoring_page.stop_requested.connect(self.stop_session)
@@ -1401,8 +1620,24 @@ class MainWindow(QMainWindow):
         self.distraction_count = 0
         self.current_session_id = None
 
+    def _on_login_success(self, user_data: dict):
+        self.current_user = user_data
+        self.login_page.clear_fields()
+        self.stack.setCurrentWidget(self.main_page)
+
+    def _on_register_success(self, user_data: dict):
+        self.register_page.clear_fields()
+        QMessageBox.information(self, "회원가입 완료", "계정이 생성되었습니다. 로그인해주세요.")
+        self.stack.setCurrentWidget(self.login_page)
+
+    def _on_logout(self):
+        self.current_user = None
+        self.login_page.clear_fields()
+        self.stack.setCurrentWidget(self.login_page)
+
     def start_session(self):
-        session_data = self.network_client.start_session()
+        user_id = self.current_user.get("user_id") if self.current_user else None
+        session_data = self.network_client.start_session(user_id=user_id)
         if session_data and session_data.get("session_id"):
             self.current_session_id = session_data.get("session_id")
             logger.info(f"Session started on server: {self.current_session_id}")
@@ -1449,7 +1684,8 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.analysis_page)
 
     def show_history(self):
-        self.history_page.load_data()
+        user_id = self.current_user.get("user_id") if self.current_user else None
+        self.history_page.load_data(user_id=user_id)
         self.stack.setCurrentWidget(self.history_page)
 
     def _on_set_baseline_from_monitoring(self):

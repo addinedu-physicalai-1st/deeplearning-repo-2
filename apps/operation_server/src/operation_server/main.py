@@ -15,7 +15,9 @@ import json
 from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Security, Depends, Response, Request
 from fastapi.security.api_key import APIKeyHeader
-from shared.schemas import InferenceRequest, InferenceResponse, SessionStartResponse, SessionSummary, FeedbackRequest, FeedbackResponse, SessionLogsResponse, FocusLogItem
+from shared.schemas import (InferenceRequest, InferenceResponse, SessionStartResponse, SessionSummary,
+                             FeedbackRequest, FeedbackResponse, SessionLogsResponse, FocusLogItem,
+                             UserRegisterRequest, UserLoginRequest, UserResponse, LoginResponse, SessionStartRequest)
 from typing import List
 from dotenv import load_dotenv
 from starlette.status import HTTP_403_FORBIDDEN
@@ -56,6 +58,18 @@ try:
                 conn.execute(text("ALTER TABLE focus_logs ADD COLUMN gaze_data JSON"))
 except Exception as e:
     logging.warning(f"Migration gaze_data: {e}")
+
+# Add user_id column to monitoring_sessions if missing
+try:
+    if "sqlite" in str(engine.url):
+        with engine.connect() as conn:
+            r = conn.execute(text("PRAGMA table_info(monitoring_sessions)"))
+            cols = [row[1] for row in r]
+        if "user_id" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE monitoring_sessions ADD COLUMN user_id INTEGER"))
+except Exception as e:
+    logging.warning(f"Migration user_id: {e}")
 
 load_dotenv()
 
@@ -100,9 +114,44 @@ LLM_SERVER_URL = os.getenv("LLM_SERVER_URL", "http://localhost:8004/feedback")
 async def health_check():
     return {"status": "ok", "service": "operation_server"}
 
+@app.post("/auth/register", response_model=UserResponse)
+async def register(request: UserRegisterRequest, db: Session = Depends(get_db)):
+    existing = db.query(models.User).filter(models.User.username == request.username).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 사용 중인 사용자 이름입니다.")
+    new_user = models.User(
+        username=request.username,
+        password_hash=models.hash_password(request.password),
+        display_name=request.display_name,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    kst = ZoneInfo("Asia/Seoul")
+    return UserResponse(
+        user_id=new_user.id,
+        username=new_user.username,
+        display_name=new_user.display_name,
+        created_at=new_user.created_at.replace(tzinfo=kst) if new_user.created_at else None,
+    )
+
+@app.post("/auth/login", response_model=LoginResponse)
+async def login(request: UserLoginRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.username == request.username).first()
+    if not user or not models.verify_password(request.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="사용자 이름 또는 비밀번호가 올바르지 않습니다.")
+    return LoginResponse(
+        user_id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        message="로그인 성공",
+    )
+
 @app.post("/sessions/start", response_model=SessionStartResponse)
-async def start_session(api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
-    new_session = models.MonitoringSession()
+async def start_session(request: SessionStartRequest = None, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
+    new_session = models.MonitoringSession(
+        user_id=request.user_id if request else None
+    )
     db.add(new_session)
     db.commit()
     db.refresh(new_session)
@@ -125,8 +174,11 @@ async def get_session(session_id: str, api_key: str = Depends(get_api_key), db: 
     )
 
 @app.get("/sessions", response_model=List[SessionSummary])
-async def get_sessions(api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
-    sessions = db.query(models.MonitoringSession).filter(models.MonitoringSession.end_time != None).order_by(models.MonitoringSession.start_time.desc()).all()
+async def get_sessions(user_id: int = None, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
+    query = db.query(models.MonitoringSession).filter(models.MonitoringSession.end_time != None)
+    if user_id is not None:
+        query = query.filter(models.MonitoringSession.user_id == user_id)
+    sessions = query.order_by(models.MonitoringSession.start_time.desc()).all()
     kst = ZoneInfo("Asia/Seoul")
     return [
         SessionSummary(
