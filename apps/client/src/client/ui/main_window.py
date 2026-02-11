@@ -4,7 +4,7 @@ import cv2
 import time
 import logging
 import numpy as np
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication, QProgressBar, QDateEdit, QScrollArea, QLineEdit
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication, QProgressBar, QDateEdit, QScrollArea, QLineEdit, QSizePolicy
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QRectF, QEasingCurve, QDate, QElapsedTimer
 from PyQt6.QtGui import QImage, QPixmap, QColor, QFont, QPainter, QPen, QBrush, QPainterPath
 import pyqtgraph as pg
@@ -290,10 +290,6 @@ class InferenceThread(QThread):
 class MainPage(QWidget):
     """프로그램 시작 메인 화면 (GNOME-inspired)"""
     start_requested = pyqtSignal()
-    history_requested = pyqtSignal()
-    calibration_requested = pyqtSignal()
-    gaze_calibration_requested = pyqtSignal()
-    logout_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -326,28 +322,16 @@ class MainPage(QWidget):
         content.addWidget(title)
         content.addSpacing(8)
 
-        desc = QLabel("AI 시스템이 초기화되었습니다. 모니터링을 시작하려면 아래 버튼을 누르세요.")
+        desc = QLabel("AI 시스템이 초기화되었습니다.\n모니터링을 시작하려면 아래 버튼을 누르세요.")
         desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        desc.setStyleSheet("font-size: 16px; color: #9E9E9E;")
-        card_layout.addWidget(desc)
+        desc.setStyleSheet("font-size: 14px; color: #a8a8a2;")
+        desc.setFixedWidth(400)
+        desc.setMinimumHeight(70)
+        content.addWidget(desc, alignment=Qt.AlignmentFlag.AlignCenter)
+        content.addSpacing(32)
 
-        # Connection Status
-        self.status_label = QLabel("Checking server connection...")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("color: #FFB74D; font-weight: bold;")  # Orange for waiting
-        card_layout.addWidget(self.status_label)
-
-        self.calibration_btn = QPushButton("거리 캘리브레이션")
-        self.calibration_btn.setObjectName("SecondaryBtn")
-        self.calibration_btn.clicked.connect(self.calibration_requested.emit)
-        card_layout.addWidget(self.calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self.gaze_calibration_btn = QPushButton("시선 캘리브레이션")
-        self.gaze_calibration_btn.setObjectName("SecondaryBtn")
-        self.gaze_calibration_btn.clicked.connect(self.gaze_calibration_requested.emit)
-        card_layout.addWidget(self.gaze_calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self.start_btn = QPushButton("START NEW SESSION")
+        # Start button
+        self.start_btn = QPushButton("  \u25B6  모니터링 시작")
         self.start_btn.setObjectName("PrimaryBtn")
         self.start_btn.setEnabled(False)
         self.start_btn.setMinimumWidth(320)
@@ -1118,15 +1102,17 @@ class MonitoringPage(QWidget):
         # Overlay Notification Label (red, 비집중)
         self.overlay_label = QLabel("DISTRACTION DETECTED!")
         self.overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.overlay_label.setWordWrap(True)
         self.overlay_label.setStyleSheet("""
-            background-color: rgba(207, 102, 121, 200); 
-            color: white; 
-            font-size: 24px; 
-            font-weight: bold; 
+            background-color: rgba(207, 102, 121, 200);
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
             border-radius: 10px;
             padding: 20px;
         """)
-        self.overlay_label.setFixedSize(400, 100)
+        self.overlay_label.setMaximumWidth(600)
+        self.overlay_label.setMinimumHeight(100)
         self.overlay_label.hide()
         alert_layout.addWidget(self.overlay_label, 0, Qt.AlignmentFlag.AlignCenter)
 
@@ -1885,7 +1871,7 @@ class HistoryPage(QWidget):
     def show_detail(self, item):
         row = item.row()
         session_data = self.table.item(row, 4).data(Qt.ItemDataRole.UserRole)
-        self.parent().parent().show_report_detail(session_data)
+        self.window().show_report_detail(session_data)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -2085,11 +2071,7 @@ class MainWindow(QMainWindow):
 
         # --- Signals: Page Actions ---
         self.main_page.start_requested.connect(self.start_session)
-        self.main_page.history_requested.connect(self.show_history)
-        self.main_page.calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.calibration_page))
-        self.main_page.gaze_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.gaze_calibration_page))
-        self.main_page.logout_requested.connect(self._on_logout)
-        self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.calibration_page.done_requested.connect(lambda: self._navigate_to("home"))
         self.gaze_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.monitoring_page.stop_requested.connect(self.stop_session)
         self.monitoring_page.set_baseline_requested.connect(self._on_set_baseline_from_monitoring)
@@ -2175,6 +2157,7 @@ class MainWindow(QMainWindow):
             self.distraction_count = 0
             self.history_scores = []
             self.stack.setCurrentWidget(self.monitoring_page)
+            self.request_inference()
             self.inference_timer.start(3000)
         else:
             logger.error("Failed to connect to Operation Server.")
@@ -2289,7 +2272,8 @@ class MainWindow(QMainWindow):
                     280, 210, Qt.AspectRatioMode.KeepAspectRatio))
                 m_page.warning_card.show()
             
-            m_page.overlay_label.setText(f"ATTENTION!\n{result.status_message}")
+            details = "<br>".join(f"• {m.strip()}" for m in result.status_message.split(" | "))
+            m_page.overlay_label.setText(f"<div style='text-align:center;'><b style='font-size:26px;'>ATTENTION!</b><br><span style='font-size:16px;'>{details}</span></div>")
             m_page.overlay_label.show()
             QApplication.beep()
             QTimer.singleShot(2000, m_page.overlay_label.hide)
