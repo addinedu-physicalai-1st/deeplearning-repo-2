@@ -317,9 +317,12 @@ async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_
             lx, ly, rx, ry = shoulder_coords
             draw_body_annotations(debug_frame, lx, ly, rx, ry, distance_cm, posture_percentage)
 
-            # 어깨 각도 텍스트
+            # 어깨 각도 + z축 거리 텍스트
             if shoulder_angle is not None:
                 cv2.putText(debug_frame, f"Angle: {shoulder_angle:.1f} deg", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            if distance_cm is not None:
+                cv2.putText(debug_frame, f"Z-Dist: {distance_cm:.1f} cm", (10, 60),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         else:
             cv2.putText(debug_frame, "No person detected", (10, 30),

@@ -812,6 +812,8 @@ class GazeCalibrationPage(QWidget):
         self.calibration_data = []
         self.current_point_index = 0
         self.current_click_count = 0
+        self._user_id = None
+        self._completed = False
 
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_preview)
@@ -884,10 +886,15 @@ class GazeCalibrationPage(QWidget):
         super().hideEvent(event)
         self.timer.stop()
 
+    def set_user_id(self, user_id):
+        """로컬 저장을 위한 현재 사용자 ID 설정."""
+        self._user_id = user_id
+
     def _reset_calibration(self):
         self.calibration_data = []
         self.current_point_index = 0
         self.current_click_count = 0
+        self._completed = False
         self._update_progress_text()
         self.status_label.setText("준비됨")
         self.status_label.setStyleSheet("font-size: 14px; color: #9E9E9E;")
@@ -1025,7 +1032,7 @@ class GazeCalibrationPage(QWidget):
         return (lx + rx) / 2, (ly + ry) / 2
 
     def _finish_calibration(self):
-        """캘리브레이션 데이터를 gaze 서버로 전송."""
+        """캘리브레이션 데이터를 gaze 서버로 전송 및 로컬 저장."""
         self.instruction_label.setText("캘리브레이션 전송 중...")
         screen = QApplication.primaryScreen()
         screen_size = screen.size()
@@ -1036,6 +1043,15 @@ class GazeCalibrationPage(QWidget):
             screen_size.height(),
         )
         if ok:
+            self._completed = True
+            if self._user_id is not None:
+                from client.core.calibration_store import save_gaze_calibration
+                save_gaze_calibration(
+                    self._user_id,
+                    self.calibration_data,
+                    screen_size.width(),
+                    screen_size.height(),
+                )
             self.status_label.setText("시선 캘리브레이션이 완료되었습니다!")
             self.status_label.setStyleSheet("font-size: 16px; color: #03DAC6; font-weight: bold;")
             self.instruction_label.setText("캘리브레이션 완료!")
@@ -1051,6 +1067,7 @@ class MonitoringPage(QWidget):
     """실시간 모니터링 화면"""
     stop_requested = pyqtSignal()
     set_baseline_requested = pyqtSignal()
+    recalibrate_gaze_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -1070,6 +1087,11 @@ class MonitoringPage(QWidget):
         self.set_baseline_btn.setObjectName("SecondaryBtn")
         self.set_baseline_btn.clicked.connect(self.set_baseline_requested.emit)
         top_bar.addWidget(self.set_baseline_btn)
+
+        self.recalibrate_gaze_btn = QPushButton("시선 다시 설정")
+        self.recalibrate_gaze_btn.setObjectName("SecondaryBtn")
+        self.recalibrate_gaze_btn.clicked.connect(self.recalibrate_gaze_requested.emit)
+        top_bar.addWidget(self.recalibrate_gaze_btn)
 
         stop_btn = QPushButton("STOP SESSION")
         stop_btn.setObjectName("StopBtn")
@@ -2146,8 +2168,6 @@ class MainWindow(QMainWindow):
         nav_items = [
             ("home", "\u2302  홈"),
             ("history", "\u29D6  기록"),
-            ("dist_calib", "\u2316  거리 캘리브레이션"),
-            ("gaze_calib", "\u25CE  시선 캘리브레이션"),
             ("debug", "\u2699  디버그"),
         ]
         for key, text in nav_items:
@@ -2276,8 +2296,6 @@ class MainWindow(QMainWindow):
         self._sidebar_page_map = {
             "home": self.main_page,
             "history": self.history_page,
-            "dist_calib": self.calibration_page,
-            "gaze_calib": self.gaze_calibration_page,
             "debug": self.debug_page,
         }
 
@@ -2290,17 +2308,18 @@ class MainWindow(QMainWindow):
         # --- Signals: Sidebar Navigation ---
         self.sidebar_buttons["home"].clicked.connect(lambda: self._navigate_to("home"))
         self.sidebar_buttons["history"].clicked.connect(self._nav_to_history)
-        self.sidebar_buttons["dist_calib"].clicked.connect(lambda: self._navigate_to("dist_calib"))
-        self.sidebar_buttons["gaze_calib"].clicked.connect(lambda: self._navigate_to("gaze_calib"))
         self.sidebar_buttons["debug"].clicked.connect(lambda: self._navigate_to("debug"))
         self.sidebar_buttons["logout"].clicked.connect(self._on_logout)
 
         # --- Signals: Page Actions ---
-        self.main_page.start_requested.connect(self.start_session)
-        self.calibration_page.done_requested.connect(lambda: self._navigate_to("home"))
-        self.gaze_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.main_page.start_requested.connect(self._begin_session_flow)
+        self.calibration_page.done_requested.connect(self._on_distance_calibration_done)
+        self.gaze_calibration_page.done_requested.connect(self._on_gaze_calibration_done)
+        self._gaze_return_to_monitoring = False
+        self._session_start_flow = False
         self.monitoring_page.stop_requested.connect(self.stop_session)
         self.monitoring_page.set_baseline_requested.connect(self._on_set_baseline_from_monitoring)
+        self.monitoring_page.recalibrate_gaze_requested.connect(self._on_recalibrate_gaze_from_monitoring)
         self.report_page.home_requested.connect(lambda: self._navigate_to("home"))
         self.report_page.llm_analysis_requested.connect(self.show_analysis)
         self.analysis_page.home_requested.connect(lambda: self._navigate_to("home"))
@@ -2328,6 +2347,8 @@ class MainWindow(QMainWindow):
         self.current_session_id = None
 
     def _navigate_to(self, key):
+        if key == "home":
+            self._session_start_flow = False
         page = self._sidebar_page_map.get(key)
         if page:
             self.stack.setCurrentWidget(page)
@@ -2368,16 +2389,84 @@ class MainWindow(QMainWindow):
 
     def _on_logout(self):
         self.current_user = None
+        self._session_start_flow = False
         self.login_page.clear_fields()
         self.stack.setCurrentWidget(self.login_page)
 
     def start_session(self):
+        """모니터링 시작: 거리 캘리브레이션 → 시선 캘리브레이션 → 모니터링 플로우."""
+        self._begin_session_flow()
+
+    def _begin_session_flow(self):
+        """Step 1: 거리 캘리브레이션 페이지로 이동."""
+        self._session_start_flow = True
+        self.stack.setCurrentWidget(self.calibration_page)
+
+    def _on_distance_calibration_done(self):
+        """거리 캘리브레이션 완료 후 플로우 분기."""
+        if self._session_start_flow:
+            self._show_gaze_calibration_choice()
+        else:
+            self._navigate_to("home")
+
+    def _show_gaze_calibration_choice(self):
+        """Step 2: 저장된 시선 캘리브레이션 데이터 확인 및 선택."""
+        from client.core.calibration_store import load_gaze_calibration
+
+        user_id = self.current_user.get("user_id") if self.current_user else None
+        saved = load_gaze_calibration(user_id) if user_id else None
+
+        if saved is None:
+            self._navigate_to_gaze_for_flow()
+            return
+
+        timestamp_str = saved.get("timestamp", "")
+        try:
+            from datetime import datetime
+            ts = datetime.fromisoformat(timestamp_str)
+            display_time = ts.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            display_time = "알 수 없음"
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("시선 캘리브레이션")
+        msg.setText(f"이전 시선 캘리브레이션 데이터가 있습니다.\n(저장 시각: {display_time})")
+        msg.setInformativeText("이전 설정을 사용하시겠습니까?")
+        use_recent_btn = msg.addButton("최근 설정 사용", QMessageBox.ButtonRole.AcceptRole)
+        recalibrate_btn = msg.addButton("새로 설정", QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(use_recent_btn)
+        msg.exec()
+
+        if msg.clickedButton() == use_recent_btn:
+            ok = self.network_client.set_gaze_calibration(
+                saved["calibration_data"],
+                saved["screen_width"],
+                saved["screen_height"],
+            )
+            if ok:
+                self._finalize_session_start()
+            else:
+                QMessageBox.warning(self, "시선 캘리브레이션",
+                    "저장된 캘리브레이션을 서버에 전송하지 못했습니다.\n새로 캘리브레이션을 진행합니다.")
+                self._navigate_to_gaze_for_flow()
+        else:
+            self._navigate_to_gaze_for_flow()
+
+    def _navigate_to_gaze_for_flow(self):
+        """시선 캘리브레이션 페이지로 이동 (user_id 설정 포함)."""
+        user_id = self.current_user.get("user_id") if self.current_user else None
+        self.gaze_calibration_page.set_user_id(user_id)
+        self.stack.setCurrentWidget(self.gaze_calibration_page)
+
+    def _finalize_session_start(self):
+        """최종 단계: 서버 세션 시작 후 모니터링 진입."""
+        self._session_start_flow = False
         user_id = self.current_user.get("user_id") if self.current_user else None
         session_data = self.network_client.start_session(user_id=user_id)
         if session_data and session_data.get("session_id"):
             self.current_session_id = session_data.get("session_id")
             logger.info(f"Session started on server: {self.current_session_id}")
-            
+
             self.is_monitoring = True
             self.start_time = time.time()
             self.distraction_count = 0
@@ -2387,9 +2476,10 @@ class MainWindow(QMainWindow):
             self.inference_timer.start(3000)
         else:
             logger.error("Failed to connect to Operation Server.")
-            QMessageBox.critical(self, "Connection Error", 
+            QMessageBox.critical(self, "Connection Error",
                                 "운영 서버와 연결할 수 없습니다.\n서버 상태를 확인하고 다시 시도해주세요.")
             self.check_server_connection()
+            self._navigate_to("home")
 
     def stop_session(self):
         if not self.is_monitoring: return
@@ -2436,6 +2526,27 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "정자세 설정", "정자세가 다시 설정되었습니다.")
         else:
             QMessageBox.warning(self, "정자세 설정", "ai_body 서버 연결에 실패했습니다.\n서버가 실행 중인지 확인하세요.")
+
+    def _on_recalibrate_gaze_from_monitoring(self):
+        """모니터링 중 시선 캘리브레이션 다시 설정: gaze 캘리브레이션 페이지로 이동."""
+        self._gaze_return_to_monitoring = True
+        user_id = self.current_user.get("user_id") if self.current_user else None
+        self.gaze_calibration_page.set_user_id(user_id)
+        self.stack.setCurrentWidget(self.gaze_calibration_page)
+
+    def _on_gaze_calibration_done(self):
+        """시선 캘리브레이션 완료 후 원래 페이지로 복귀."""
+        if self._session_start_flow:
+            if self.gaze_calibration_page._completed:
+                self._finalize_session_start()
+            else:
+                self._session_start_flow = False
+                self._navigate_to("home")
+        elif self._gaze_return_to_monitoring:
+            self._gaze_return_to_monitoring = False
+            self.stack.setCurrentWidget(self.monitoring_page)
+        else:
+            self.stack.setCurrentWidget(self.main_page)
 
     def show_report_detail(self, session_data):
         self.report_page.set_report_data(session_data)
