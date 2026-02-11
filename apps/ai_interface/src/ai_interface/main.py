@@ -362,7 +362,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             if body_result:
                 distance_cm = (body_result.get("body_pose") or {}).get("distance_cm")
                 if isinstance(distance_cm, (int, float)) and distance_cm > 0:
-                    position_score = max(0.0, min(1.0, (50.0 - distance_cm) / 50.0))
+                    position_score = max(0.0, 1.0 - abs(MONITOR_DISTANCE_CM - distance_cm) / MONITOR_DISTANCE_CM)
 
             # 3) Head + gaze score
             head_gaze_score = 0.5
