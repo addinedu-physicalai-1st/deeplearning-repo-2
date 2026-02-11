@@ -40,7 +40,7 @@ API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 # Ollama Configuration
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:latest")
 DB_SERVER_URL = os.getenv("DB_SERVER_URL", "http://localhost:8005")
 
 # Middleware: Limit Request Size (10MB) to prevent DoS
@@ -71,7 +71,8 @@ def generate_prompt(session_data: dict) -> str:
     start_time, end_time, 최장/평균 집중시간, sleepy 시각, 비집중 시각을 포함합니다.
     """
     duration_min = session_data.get('duration', 0) // 60
-    score = session_data.get('concentration_score', 0)
+    # 세션 전체 집중 비율(%). 키 이름도 focus_ratio로 통일.
+    focus_ratio = session_data.get('focus_ratio', 0)
     distractions = session_data.get('distract_cnt', 0)
     start_time = session_data.get('start_time', '')
     end_time = session_data.get('end_time', '')
@@ -83,7 +84,7 @@ def generate_prompt(session_data: dict) -> str:
     lines = [
         "당신은 업무 생산성 코치입니다. 다음 세션 데이터를 분석해주세요.",
         f"- 집중 시간: {duration_min}분",
-        f"- 집중 점수: {score}점",
+        f"- 집중 비율: {focus_ratio:.1f}%",
         f"- 산만 횟수: {distractions}회",
     ]
     if start_time or end_time:
@@ -97,8 +98,8 @@ def generate_prompt(session_data: dict) -> str:
     if distracted_ts:
         lines.append(f"- 비집중으로 기록된 시각(일부): {', '.join(str(t) for t in distracted_ts[:15])}{' ...' if len(distracted_ts) > 15 else ''}")
     lines.append("")
-    lines.append("사용자의 감정을 고려한 따뜻한 격려나 위로의 말(comment)과 데이터에 기반한 구체적이고 실천 가능한 행동 교정 팁(feedback)을 제공해주세요.")
-    lines.append("feedback은 반드시 1. 2. 3. 처럼 번호를 붙인 항목으로 작성해주세요.")
+    lines.append("사용자의 감정을 고려한 따뜻한 격려나 위로의 말(comment)과 데이터에 기반한 구체적이고 실천 가능한 행동 교정 팁(feedback)을 한국어로 제공해주세요.")
+    lines.append("feedback은 반드시 한국어로 1. 2. 3. 처럼 번호를 붙인 항목으로 작성해주세요.")
     return "\n".join(lines)
 
 @app.get("/")
