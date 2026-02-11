@@ -114,6 +114,53 @@ async def get_api_key(header_api_key: str = Depends(api_key_header)):
         status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
     )
 
+def encode_frame_to_base64(frame):
+    """OpenCV BGR 프레임을 JPEG base64 문자열로 인코딩."""
+    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return base64.b64encode(buffer).decode('utf-8')
+
+
+def draw_pose_axes(frame, nose_px, pitch, yaw, roll, axis_length=80):
+    """코(nose) 위치에서 pitch/yaw/roll 기반 3D 축을 화살표로 표시."""
+    import math
+    # estimate_pose 규약: pitch>0=아래, pitch<0=위
+    # 회전 행렬 규약: pitch>0=위 → 부호 반전 필요
+    pitch_r = math.radians(-pitch)
+    yaw_r = math.radians(yaw)
+    roll_r = math.radians(roll)
+
+    cos_y, sin_y = math.cos(yaw_r), math.sin(yaw_r)
+    cos_p, sin_p = math.cos(pitch_r), math.sin(pitch_r)
+    cos_r, sin_r = math.cos(roll_r), math.sin(roll_r)
+
+    origin = (int(nose_px[0]), int(nose_px[1]))
+
+    # X axis (red) - Yaw 방향
+    x_end = (
+        int(nose_px[0] + axis_length * (cos_y * cos_r + sin_y * sin_p * sin_r)),
+        int(nose_px[1] + axis_length * (cos_p * sin_r))
+    )
+    # Y axis (green) - Pitch 방향
+    y_end = (
+        int(nose_px[0] + axis_length * (-cos_y * sin_r + sin_y * sin_p * cos_r)),
+        int(nose_px[1] + axis_length * (cos_p * cos_r))
+    )
+    # Z axis (blue) - Forward 방향
+    z_end = (
+        int(nose_px[0] + axis_length * (sin_y * cos_p)),
+        int(nose_px[1] - axis_length * sin_p)
+    )
+
+    cv2.arrowedLine(frame, origin, x_end, (0, 0, 255), 3, tipLength=0.2)   # Red = X
+    cv2.arrowedLine(frame, origin, y_end, (0, 255, 0), 3, tipLength=0.2)   # Green = Y
+    cv2.arrowedLine(frame, origin, z_end, (255, 0, 0), 3, tipLength=0.2)   # Blue = Z
+
+    # 각도 텍스트 표시
+    cv2.putText(frame, f"P:{pitch:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(frame, f"Y:{yaw:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    cv2.putText(frame, f"R:{roll:.1f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+
 def estimate_pose(keypoints_normalized):
     """
     keypoints_normalized: [17, 2] array of keypoints (x, y) in normalized [0, 1] range
@@ -139,8 +186,8 @@ def estimate_pose(keypoints_normalized):
     neutral_offset = 0.45  # 정면 응시 시 코의 일반적인 수직 위치 오프셋
     pitch = (pitch_raw - neutral_offset) * 120 
 
-    # Roll (Tilt)
-    roll = np.arctan2(r_eye[1] - l_eye[1], r_eye[0] - l_eye[0]) * 180 / np.pi
+    # Roll (Tilt): 이미지 기준으로 l_eye(화면 우측)→r_eye(화면 좌측) 벡터 방향
+    roll = np.arctan2(l_eye[1] - r_eye[1], l_eye[0] - r_eye[0]) * 180 / np.pi
 
     return pitch, yaw, roll
 
@@ -362,6 +409,117 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             is_distracted=False, 
             status_message=f"Server Error"
         )
+
+@app.post("/debug_inference")
+async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
+    """디버그용: 추론 결과 + 3D 포즈 축이 그려진 어노테이션 이미지를 반환."""
+    global target_id
+
+    if not request.image_base64:
+        return {"data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": False, "status_message": "No image"}, "annotated_image": None}
+
+    try:
+        try:
+            img_data = base64.b64decode(request.image_base64)
+        except Exception:
+            return {"data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": False, "status_message": "Invalid base64"}, "annotated_image": None}
+
+        if len(img_data) < 4:
+            return {"data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": False, "status_message": "Invalid image"}, "annotated_image": None}
+
+        is_valid_image = (
+            img_data.startswith(b'\xff\xd8\xff') or
+            img_data.startswith(b'\x89PNG') or
+            img_data.startswith(b'RIFF')
+        )
+        if not is_valid_image:
+            return {"data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": False, "status_message": "Unsupported format"}, "annotated_image": None}
+
+        nparr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": False, "status_message": "Decode error"}, "annotated_image": None}
+
+        debug_frame = frame.copy()
+        results = model.track(frame, persist=True, verbose=False)
+
+        if not results[0].boxes or results[0].boxes.id is None:
+            cv2.putText(debug_frame, "No person detected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            return {
+                "data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": True, "status_message": "No person detected"},
+                "annotated_image": encode_frame_to_base64(debug_frame)
+            }
+
+        boxes = results[0].boxes
+        ids = boxes.id.cpu().numpy().astype(int)
+        keypoints_data = results[0].keypoints.xyn.cpu().numpy()
+        img_h, img_w = frame.shape[:2]
+        centers = boxes.xywh.cpu().numpy()[:, :2]
+        center_points = np.array([img_w / 2, img_h / 2])
+        distances = np.linalg.norm(centers - center_points, axis=1)
+
+        if target_id is None or target_id not in ids:
+            target_idx = np.argmin(distances)
+            target_id = int(ids[target_idx])
+
+        try:
+            current_idx = list(ids).index(target_id)
+        except ValueError:
+            cv2.putText(debug_frame, "Target lost", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            return {
+                "data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": True, "status_message": "Target lost"},
+                "annotated_image": encode_frame_to_base64(debug_frame)
+            }
+
+        target_kpts = keypoints_data[current_idx]
+        pitch, yaw, roll = estimate_pose(target_kpts)
+
+        # 코(nose) 픽셀 좌표 계산
+        nose_px = (target_kpts[0][0] * img_w, target_kpts[0][1] * img_h)
+
+        # 키포인트 그리기 (코, 눈, 귀)
+        kpt_indices = [0, 1, 2, 3, 4, 5, 6]  # nose, eyes, ears, shoulders
+        for idx in kpt_indices:
+            kx = int(target_kpts[idx][0] * img_w)
+            ky = int(target_kpts[idx][1] * img_h)
+            if kx > 0 and ky > 0:
+                cv2.circle(debug_frame, (kx, ky), 4, (0, 255, 255), -1)
+
+        # 3D 포즈 축 그리기
+        if not (pitch == 0 and yaw == 0):
+            draw_pose_axes(debug_frame, nose_px, pitch, yaw, roll)
+
+        # 집중 판단
+        is_distracted = False
+        reason = ""
+        if not (pitch == 0 and yaw == 0):
+            if abs(yaw) > YAW_LIMIT:
+                is_distracted = True
+                reason = "Looking Away (Side)"
+            elif pitch < PITCH_UP_LIMIT:
+                is_distracted = True
+                reason = "Looking Up"
+            elif pitch > PITCH_DOWN_LIMIT:
+                is_distracted = True
+                reason = "Looking Down"
+        status_message = "Focused" if not is_distracted else f"Distracted ({reason})"
+
+        # 상태 텍스트 표시
+        color = (0, 0, 255) if is_distracted else (0, 255, 0)
+        cv2.putText(debug_frame, status_message, (10, img_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+
+        return {
+            "data": {
+                "pitch": float(pitch), "yaw": float(yaw), "roll": float(roll),
+                "is_distracted": is_distracted, "status_message": status_message
+            },
+            "annotated_image": encode_frame_to_base64(debug_frame)
+        }
+
+    except Exception as e:
+        logger.exception(f"[!] Debug Inference Error: {e}")
+        return {"data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": False, "status_message": "Server Error"}, "annotated_image": None}
+
 
 if __name__ == "__main__":
     import uvicorn

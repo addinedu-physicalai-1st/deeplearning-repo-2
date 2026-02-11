@@ -8,12 +8,13 @@ from shared.schemas import InferenceRequest, InferenceResponse
 logger = logging.getLogger(__name__)
 
 class NetworkClient:
-    def __init__(self, operation_url=None, api_key=None, ai_body_url=None, ai_gaze_url=None, ai_head_url=None):
+    def __init__(self, operation_url=None, api_key=None, ai_body_url=None, ai_gaze_url=None, ai_head_url=None, ai_emotion_url=None):
         self.operation_url = operation_url or os.getenv("OPERATION_SERVER_URL", "http://localhost:8000/inference")
         self.api_key = api_key or os.getenv("API_KEY")
         self.ai_body_url = (ai_body_url or os.getenv("AI_BODY_URL", "http://localhost:8003")).rstrip("/")
         self.ai_gaze_url = (ai_gaze_url or os.getenv("AI_GAZE_URL", "http://localhost:8005")).rstrip("/")
         self.ai_head_url = (ai_head_url or os.getenv("AI_HEAD_URL", "http://localhost:8001")).rstrip("/")
+        self.ai_emotion_url = (ai_emotion_url or os.getenv("AI_EMOTION_URL", "http://localhost:8002")).rstrip("/")
 
         if not self.api_key:
             logger.warning("API_KEY is not set. Requests will likely fail.")
@@ -191,6 +192,19 @@ class NetworkClient:
         except Exception as e:
             logger.error(f"Error sending set_thresholds to ai_head: {e}")
             return False
+
+    def send_debug_inference(self, server_url: str, image_base64: str) -> dict | None:
+        """POST image to <server_url>/debug_inference, return dict with 'data' and 'annotated_image'."""
+        url = f"{server_url}/debug_inference"
+        payload = InferenceRequest(image_base64=image_base64, session_id=None)
+        headers = {"X-API-Key": self.api_key, "Content-Type": "application/json"}
+        try:
+            response = requests.post(url, json=payload.dict(), headers=headers, timeout=5, verify=True)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error calling debug_inference on {server_url}: {e}")
+            return None
 
     def get_head_pose(self, image_base64: str) -> dict | None:
         """POST image to ai_head /pose (캘리브레이션용, 집중 판단 없음). Returns head_pose dict or None."""

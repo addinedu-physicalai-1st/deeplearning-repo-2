@@ -94,6 +94,35 @@ RIGHT_EYE_TOP = 159
 RIGHT_EYE_BOTTOM = 145
 
 
+def encode_frame_to_base64(frame):
+    """OpenCV BGR 프레임을 JPEG base64 문자열로 인코딩."""
+    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return base64.b64encode(buffer).decode('utf-8')
+
+
+def draw_iris_markers(frame, landmarks, w, h):
+    """양쪽 홍채 중심에 초록색 점을 표시."""
+    def iris_center_px(indices):
+        xs = [landmarks[i].x * w for i in indices]
+        ys = [landmarks[i].y * h for i in indices]
+        return int(np.mean(xs)), int(np.mean(ys))
+
+    left_cx, left_cy = iris_center_px(LEFT_IRIS)
+    right_cx, right_cy = iris_center_px(RIGHT_IRIS)
+
+    # 홍채 중심 초록 점
+    cv2.circle(frame, (left_cx, left_cy), 5, (0, 255, 0), -1)
+    cv2.circle(frame, (right_cx, right_cy), 5, (0, 255, 0), -1)
+
+    # 홍채 랜드마크 포인트 (작은 점)
+    for idx in LEFT_IRIS + RIGHT_IRIS:
+        px = int(landmarks[idx].x * w)
+        py = int(landmarks[idx].y * h)
+        cv2.circle(frame, (px, py), 2, (0, 200, 0), -1)
+
+    return (left_cx, left_cy), (right_cx, right_cy)
+
+
 def extract_iris_position(landmarks, image_width, image_height):
     """
     양쪽 눈의 iris 중심을 eye contour 대비 정규화 좌표(0~1)로 반환.
@@ -307,6 +336,100 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             is_distracted=False,
             status_message="서버 오류가 발생했습니다"
         )
+
+
+@app.post("/debug_inference")
+async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
+    """디버그용: 추론 결과 + 홍채 마커가 그려진 어노테이션 이미지를 반환."""
+    if not request.image_base64:
+        return {"data": {"iris_x": 0, "iris_y": 0, "calibrated": False}, "annotated_image": None}
+
+    try:
+        try:
+            img_data = base64.b64decode(request.image_base64)
+        except Exception:
+            return {"data": {"iris_x": 0, "iris_y": 0, "calibrated": False}, "annotated_image": None}
+
+        if len(img_data) < 4:
+            return {"data": {"iris_x": 0, "iris_y": 0, "calibrated": False}, "annotated_image": None}
+
+        is_valid_image = (
+            img_data.startswith(b'\xff\xd8\xff') or
+            img_data.startswith(b'\x89PNG') or
+            img_data.startswith(b'RIFF')
+        )
+        if not is_valid_image:
+            return {"data": {"iris_x": 0, "iris_y": 0, "calibrated": False}, "annotated_image": None}
+
+        nparr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"data": {"iris_x": 0, "iris_y": 0, "calibrated": False}, "annotated_image": None}
+
+        debug_frame = frame.copy()
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        image_rgb.flags.writeable = False
+        results = face_mesh.process(image_rgb)
+        image_rgb.flags.writeable = True
+
+        if not results.multi_face_landmarks:
+            cv2.putText(debug_frame, "No face detected", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            return {
+                "data": {"iris_x": 0, "iris_y": 0, "calibrated": calibration_model is not None, "gaze_x": None, "gaze_y": None, "is_on_screen": None},
+                "annotated_image": encode_frame_to_base64(debug_frame)
+            }
+
+        face_landmarks = results.multi_face_landmarks[0]
+        h, w = frame.shape[:2]
+        iris_x, iris_y = extract_iris_position(face_landmarks.landmark, w, h)
+
+        # 홍채 마커 그리기
+        draw_iris_markers(debug_frame, face_landmarks.landmark, w, h)
+
+        # 홍채 좌표 텍스트
+        cv2.putText(debug_frame, f"Iris: ({iris_x:.3f}, {iris_y:.3f})", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        gaze_x = None
+        gaze_y = None
+        is_on_screen = None
+        status_message = "Detected (uncalibrated)"
+
+        if calibration_model is not None:
+            poly = calibration_model["poly"]
+            iris_input = poly.transform(np.array([[iris_x, iris_y]]))
+            gaze_x = float(calibration_model["model_x"].predict(iris_input)[0])
+            gaze_y = float(calibration_model["model_y"].predict(iris_input)[0])
+
+            bounds = calibration_bounds
+            is_on_screen = (
+                bounds["left"] <= gaze_x <= bounds["right"] and
+                bounds["top"] <= gaze_y <= bounds["bottom"]
+            )
+
+            color = (0, 255, 0) if is_on_screen else (0, 0, 255)
+            status_text = "On Screen" if is_on_screen else "Off Screen"
+            cv2.putText(debug_frame, f"Gaze: ({gaze_x:.0f}, {gaze_y:.0f}) {status_text}", (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            status_message = status_text
+
+        return {
+            "data": {
+                "iris_x": round(iris_x, 4),
+                "iris_y": round(iris_y, 4),
+                "gaze_x": round(gaze_x, 1) if gaze_x is not None else None,
+                "gaze_y": round(gaze_y, 1) if gaze_y is not None else None,
+                "is_on_screen": is_on_screen,
+                "calibrated": calibration_model is not None,
+                "status_message": status_message
+            },
+            "annotated_image": encode_frame_to_base64(debug_frame)
+        }
+
+    except Exception as e:
+        logger.exception(f"[!] Debug Inference Error: {e}")
+        return {"data": {"iris_x": 0, "iris_y": 0, "calibrated": False}, "annotated_image": None}
 
 
 if __name__ == "__main__":

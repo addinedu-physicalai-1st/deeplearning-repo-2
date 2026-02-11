@@ -82,47 +82,73 @@ async def get_api_key(header_api_key: str = Depends(api_key_header)):
         status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
     )
 
+def encode_frame_to_base64(frame):
+    """OpenCV BGR 프레임을 JPEG base64 문자열로 인코딩."""
+    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return base64.b64encode(buffer).decode('utf-8')
+
+
+def draw_body_annotations(frame, lx, ly, rx, ry, distance_cm, posture_pct):
+    """어깨 선 + 거리 텍스트를 프레임에 표시."""
+    pt1 = (int(lx), int(ly))
+    pt2 = (int(rx), int(ry))
+    cv2.line(frame, pt1, pt2, (0, 255, 255), 3)     # 노란색 어깨 선
+    cv2.circle(frame, pt1, 6, (0, 255, 0), -1)       # 좌 어깨 초록 점
+    cv2.circle(frame, pt2, 6, (0, 255, 0), -1)       # 우 어깨 초록 점
+
+    mid_x = (int(lx) + int(rx)) // 2
+    mid_y = (int(ly) + int(ry)) // 2
+    if distance_cm is not None:
+        cv2.putText(frame, f"{distance_cm:.1f} cm", (mid_x - 40, mid_y - 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+    if posture_pct is not None:
+        cv2.putText(frame, f"Posture: {posture_pct:.0f}%", (mid_x - 60, mid_y + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 255, 100), 2)
+
+
 def process_posture(frame):
     """
     MediaPipe Holistic을 사용하여 자세 분석
-    Returns: shoulder_angle, distance_cm, posture_percentage, distance_offset_cm
+    Returns: shoulder_angle, distance_cm, posture_percentage, distance_offset_cm, shoulder_coords
     """
     global baseline_distance, baseline_distance_cm
-    
+
     image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     image.flags.writeable = False
     results = holistic.process(image)
     image.flags.writeable = True
-    
+
     height, width, _ = image.shape
     shoulder_angle = None
     distance_cm = None
     posture_percentage = None
     distance_offset_cm = None
-    
+    shoulder_coords = None
+
     if results.face_landmarks and results.pose_landmarks:
         # 어깨 좌표로 어깨 기울기 계산
         pose_landmarks = results.pose_landmarks.landmark
         left_sh = pose_landmarks[mp_holistic.PoseLandmark.LEFT_SHOULDER]
         right_sh = pose_landmarks[mp_holistic.PoseLandmark.RIGHT_SHOULDER]
-        
+
         lx, ly = left_sh.x * width, left_sh.y * height
         rx, ry = right_sh.x * width, right_sh.y * height
+        shoulder_coords = (lx, ly, rx, ry)
         dx = rx - lx
         dy = ry - ly
-        
+
         # 어깨 각도 계산 (수평선 기준)
         shoulder_angle = math.degrees(math.atan2(dy, dx))
         shoulder_angle = abs(shoulder_angle)
-        
+
         # 어깨 폭(픽셀)으로 카메라와의 거리 근사 계산
         pixel_shoulder_dist = math.hypot(dx, dy)
         REAL_SHOULDER_CM = 40.0  # 실제 어깨너비 (cm)
         FOCAL_PX = width * 1.2  # 근사 초점 거리
-        
+
         if pixel_shoulder_dist > 0:
             distance_cm = (REAL_SHOULDER_CM * FOCAL_PX) / pixel_shoulder_dist
-            
+
             # 정자세 기준값 대비 계산
             if baseline_distance is not None and distance_cm is not None:
                 # 거북목 측정: 거리 감소량을 계산
@@ -130,12 +156,12 @@ def process_posture(frame):
                 decrease_percentage = (distance_decrease / baseline_distance) * 30
                 posture_percentage = 100 - decrease_percentage
                 posture_percentage = max(0, min(100, posture_percentage))
-            
+
             # 앞뒤 이동거리 측정
             if baseline_distance_cm is not None:
                 distance_offset_cm = distance_cm - baseline_distance_cm
-    
-    return shoulder_angle, distance_cm, posture_percentage, distance_offset_cm
+
+    return shoulder_angle, distance_cm, posture_percentage, distance_offset_cm, shoulder_coords
 
 @app.get("/health")
 async def health_check(api_key: str = Depends(get_api_key)):
@@ -175,7 +201,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             raise HTTPException(status_code=400, detail="이미지를 디코딩할 수 없습니다")
         
         # 자세 분석
-        shoulder_angle, distance_cm, posture_percentage, distance_offset_cm = process_posture(frame)
+        shoulder_angle, distance_cm, posture_percentage, distance_offset_cm, _ = process_posture(frame)
         
         # 거북목 판단: 비집중으로는 하지 않고, posture_alert만 body_pose에 넣어 GUI에서 노란 경고·경고음
         is_distracted = False
@@ -242,7 +268,7 @@ async def set_baseline(request: InferenceRequest, api_key: str = Depends(get_api
         if frame is None:
             raise HTTPException(status_code=400, detail="이미지를 디코딩할 수 없습니다")
         
-        _, distance_cm, _, _ = process_posture(frame)
+        _, distance_cm, _, _, _ = process_posture(frame)
         
         if distance_cm is not None:
             baseline_distance = distance_cm
@@ -255,6 +281,64 @@ async def set_baseline(request: InferenceRequest, api_key: str = Depends(get_api
     except Exception as e:
         logger.exception(f"Baseline 설정 오류: {e}")
         raise HTTPException(status_code=500, detail="기준값 설정 실패")
+
+@app.post("/debug_inference")
+async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
+    """디버그용: 추론 결과 + 어깨선·거리가 그려진 어노테이션 이미지를 반환."""
+    if not request.image_base64:
+        return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+
+    try:
+        try:
+            img_data = base64.b64decode(request.image_base64)
+        except Exception:
+            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+
+        if len(img_data) < 4:
+            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+
+        is_valid_image = (
+            img_data.startswith(b'\xff\xd8\xff') or
+            img_data.startswith(b'\x89PNG') or
+            img_data.startswith(b'RIFF')
+        )
+        if not is_valid_image:
+            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+
+        nparr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+
+        debug_frame = frame.copy()
+        shoulder_angle, distance_cm, posture_percentage, distance_offset_cm, shoulder_coords = process_posture(frame)
+
+        if shoulder_coords is not None:
+            lx, ly, rx, ry = shoulder_coords
+            draw_body_annotations(debug_frame, lx, ly, rx, ry, distance_cm, posture_percentage)
+
+            # 어깨 각도 텍스트
+            if shoulder_angle is not None:
+                cv2.putText(debug_frame, f"Angle: {shoulder_angle:.1f} deg", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        else:
+            cv2.putText(debug_frame, "No person detected", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+        return {
+            "data": {
+                "shoulder_angle": float(shoulder_angle) if shoulder_angle is not None else None,
+                "distance_cm": float(distance_cm) if distance_cm is not None else None,
+                "posture_percentage": float(posture_percentage) if posture_percentage is not None else None,
+                "distance_offset_cm": float(distance_offset_cm) if distance_offset_cm is not None else None,
+            },
+            "annotated_image": encode_frame_to_base64(debug_frame)
+        }
+
+    except Exception as e:
+        logger.exception(f"[!] Debug Inference Error: {e}")
+        return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+
 
 if __name__ == "__main__":
     import uvicorn

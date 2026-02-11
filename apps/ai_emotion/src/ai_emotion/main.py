@@ -71,6 +71,46 @@ async def get_api_key(header_api_key: str = Depends(api_key_header)):
         status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
     )
 
+def encode_frame_to_base64(frame):
+    """OpenCV BGR 프레임을 JPEG base64 문자열로 인코딩."""
+    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return base64.b64encode(buffer).decode('utf-8')
+
+
+def draw_emotion_boxes(frame, results):
+    """YOLO 결과에서 바운딩박스 + 클래스명 + confidence를 프레임에 표시."""
+    if not results or len(results) == 0:
+        return
+    result = results[0]
+    if not result.boxes or len(result.boxes) == 0:
+        return
+
+    boxes = result.boxes
+    xyxy = boxes.xyxy.cpu().numpy()
+    confidences = boxes.conf.cpu().numpy()
+    classes = boxes.cls.cpu().numpy().astype(int)
+    class_names = result.names
+
+    for i in range(len(xyxy)):
+        x1, y1, x2, y2 = map(int, xyxy[i])
+        conf = confidences[i]
+        cls_name = class_names.get(int(classes[i]), f"class_{classes[i]}")
+
+        # 클래스별 색상
+        if cls_name.lower() == "concentrated":
+            color = (0, 255, 0)      # 초록
+        elif cls_name.lower() == "sleepy":
+            color = (0, 0, 255)      # 빨강
+        else:
+            color = (0, 165, 255)    # 주황 (Distracted 등)
+
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        label = f"{cls_name} {conf:.2f}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), color, -1)
+        cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+
 def extract_emotion_from_results(results):
     """
     YOLO 모델 결과에서 감정 정보를 추출합니다.
@@ -189,6 +229,78 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             is_distracted=False, 
             status_message=f"서버 오류가 발생했습니다"
         )
+
+@app.post("/debug_inference")
+async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
+    """디버그용: 추론 결과 + 바운딩박스가 그려진 어노테이션 이미지를 반환."""
+    if not request.image_base64:
+        return {"data": {"emotion": None, "confidence": 0, "is_distracted": False}, "annotated_image": None}
+
+    try:
+        try:
+            img_data = base64.b64decode(request.image_base64)
+        except Exception:
+            return {"data": {"emotion": None, "confidence": 0, "is_distracted": False}, "annotated_image": None}
+
+        if len(img_data) < 4:
+            return {"data": {"emotion": None, "confidence": 0, "is_distracted": False}, "annotated_image": None}
+
+        is_valid_image = (
+            img_data.startswith(b'\xff\xd8\xff') or
+            img_data.startswith(b'\x89PNG') or
+            img_data.startswith(b'RIFF')
+        )
+        if not is_valid_image:
+            return {"data": {"emotion": None, "confidence": 0, "is_distracted": False}, "annotated_image": None}
+
+        nparr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"data": {"emotion": None, "confidence": 0, "is_distracted": False}, "annotated_image": None}
+
+        # 어노테이션은 원본 컬러 프레임에 그림
+        debug_frame = frame.copy()
+
+        # 추론은 기존과 동일하게 그레이스케일 변환 후 진행
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray_frame = cv2.cvtColor(gray_frame, cv2.COLOR_GRAY2BGR)
+        results = model(gray_frame, verbose=False)
+
+        # 바운딩박스 + 클래스 어노테이션 그리기
+        draw_emotion_boxes(debug_frame, results)
+
+        # 감정 정보 추출
+        emotion_data = extract_emotion_from_results(results)
+        is_distracted = False
+        if emotion_data:
+            emotion_name = emotion_data.get("emotion", "").lower()
+            distracted_emotions = ["distracted", "sleepy"]
+            if emotion_name in distracted_emotions:
+                is_distracted = True
+
+            # 상태 텍스트 표시
+            color = (0, 0, 255) if is_distracted else (0, 255, 0)
+            status_text = f"{emotion_data['emotion']} | {'Distracted' if is_distracted else 'Focused'}"
+            cv2.putText(debug_frame, status_text, (10, debug_frame.shape[0] - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        else:
+            cv2.putText(debug_frame, "No face detected", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+        return {
+            "data": {
+                "emotion": emotion_data.get("emotion") if emotion_data else None,
+                "confidence": emotion_data.get("confidence", 0) if emotion_data else 0,
+                "class_id": emotion_data.get("class_id") if emotion_data else None,
+                "is_distracted": is_distracted
+            },
+            "annotated_image": encode_frame_to_base64(debug_frame)
+        }
+
+    except Exception as e:
+        logger.exception(f"[!] Debug Inference Error: {e}")
+        return {"data": {"emotion": None, "confidence": 0, "is_distracted": False}, "annotated_image": None}
+
 
 if __name__ == "__main__":
     import uvicorn
