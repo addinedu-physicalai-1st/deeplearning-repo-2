@@ -1,5 +1,4 @@
 import sys
-import os
 
 # No need for manual sys.path manipulation if running through uv or correctly installed
 from PyQt6.QtWidgets import QApplication

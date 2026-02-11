@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "pyqt6>=6.4.0",
-    "opencv-python>=4.7.0",
+    "opencv-python-headless>=4.7.0",
     "requests>=2.28.0",
     "python-dotenv>=1.0.0",
     "monitor-shared",

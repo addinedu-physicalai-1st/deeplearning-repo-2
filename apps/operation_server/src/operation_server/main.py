@@ -7,6 +7,7 @@ src_dir = os.path.dirname(current_dir)
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
+import asyncio
 import httpx
 import logging
 import secrets
@@ -24,11 +25,11 @@ from starlette.status import HTTP_403_FORBIDDEN
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # Change to absolute imports within the package
-from operation_server.database import engine, get_db
+from operation_server.database import engine, get_db, SessionLocal
 from operation_server import models
 
 # Create database tables
@@ -73,6 +74,9 @@ except Exception as e:
 
 load_dotenv()
 
+# Data retention settings
+DATA_RETENTION_DAYS = int(os.getenv("DATA_RETENTION_DAYS", "30"))
+
 # Logging setup
 logging.basicConfig(
     level=logging.INFO,
@@ -105,6 +109,49 @@ async def get_api_key(header_api_key: str = Depends(api_key_header)):
     raise HTTPException(
         status_code=HTTP_403_FORBIDDEN, detail="인증 정보를 확인할 수 없습니다"
     )
+
+def cleanup_expired_data():
+    """보관 기간이 만료된 세션 및 로그 데이터를 삭제합니다."""
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None) - timedelta(days=DATA_RETENTION_DAYS)
+
+        expired_sessions = db.query(models.MonitoringSession).filter(
+            models.MonitoringSession.start_time < cutoff
+        ).all()
+
+        if not expired_sessions:
+            logger.info("만료된 데이터가 없습니다.")
+            return
+
+        session_ids = [s.id for s in expired_sessions]
+
+        deleted_logs = db.query(models.FocusLog).filter(
+            models.FocusLog.session_id.in_(session_ids)
+        ).delete(synchronize_session=False)
+
+        deleted_sessions = db.query(models.MonitoringSession).filter(
+            models.MonitoringSession.id.in_(session_ids)
+        ).delete(synchronize_session=False)
+
+        db.commit()
+        logger.info(f"데이터 정리 완료: {deleted_sessions}개 세션, {deleted_logs}개 로그 삭제 (보관 기간: {DATA_RETENTION_DAYS}일)")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"데이터 정리 중 오류: {e}")
+    finally:
+        db.close()
+
+async def _periodic_cleanup():
+    """24시간 간격으로 만료 데이터를 정리하는 백그라운드 태스크."""
+    while True:
+        await asyncio.sleep(86400)
+        cleanup_expired_data()
+
+@app.on_event("startup")
+async def on_startup():
+    cleanup_expired_data()
+    asyncio.create_task(_periodic_cleanup())
 
 # Service URLs (AI_INTERFACE_URL is base e.g. http://localhost:8010; inference = base + /inference)
 AI_INTERFACE_BASE = (os.getenv("AI_INTERFACE_URL", "http://localhost:8010").rstrip("/").replace("/inference", "") or "http://localhost:8010")

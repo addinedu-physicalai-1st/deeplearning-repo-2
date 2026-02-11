@@ -77,6 +77,31 @@ def check_port(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('localhost', port)) == 0
 
+# PyQt6 xcb 플랫폼 플러그인에 필요한 시스템 패키지 목록
+REQUIRED_SYSTEM_PACKAGES = ["libxcb-cursor0"]
+
+def ensure_system_packages():
+    """PyQt6 실행에 필요한 시스템 패키지가 없으면 자동 설치한다."""
+    import platform
+    if platform.system() != "Linux":
+        return
+    missing = []
+    for pkg in REQUIRED_SYSTEM_PACKAGES:
+        ret = subprocess.run(
+            ["dpkg", "-s", pkg],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if ret.returncode != 0:
+            missing.append(pkg)
+    if not missing:
+        return
+    pkgs = " ".join(missing)
+    print(f"📦 PyQt6에 필요한 시스템 패키지를 설치합니다: {pkgs}")
+    ret = subprocess.run(["sudo", "apt", "install", "-y", *missing])
+    if ret.returncode != 0:
+        print(f"⚠️  시스템 패키지 설치에 실패했습니다. 수동으로 설치하세요: sudo apt install {pkgs}")
+        sys.exit(1)
+
 def validate_env(app_name, app_path):
     """Validate .env file existence and basic content."""
     env_path = Path(app_path) / ".env"
@@ -124,6 +149,9 @@ def main():
     print("🚀 Focus Monitor 통합 개발 서버 실행기")
     print("=" * 60)
     
+    # 0. 시스템 패키지 점검
+    ensure_system_packages()
+
     # 1. 사전 점검
     print("\n🔍 사전 점검 중...")
     errors = []
