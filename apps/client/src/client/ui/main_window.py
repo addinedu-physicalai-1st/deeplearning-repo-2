@@ -19,34 +19,74 @@ logger = logging.getLogger(__name__)
 
 # --- 공통 스타일 정의 ---
 STYLE_SHEET = """
-    QMainWindow { background-color: #121212; }
-    QWidget { color: #E0E0E0; font-family: 'Segoe UI', sans-serif; }
-    QFrame#Card { background-color: #1E1E1E; border-radius: 12px; border: 1px solid #333; }
-    QLabel#Title { font-size: 32px; font-weight: bold; color: #BB86FC; margin-bottom: 20px; }
-    QLabel#Header { font-size: 18px; color: #9E9E9E; }
+    QMainWindow { background-color: #242424; }
+    QWidget { color: #eeeeec; font-family: 'Ubuntu', 'Segoe UI', sans-serif; }
+    QFrame#Card { background-color: #353535; border-radius: 12px; border: 1px solid #1a1a1a; }
+    QLabel#Title { font-size: 28px; font-weight: bold; color: #eeeeec; margin-bottom: 16px; }
+    QLabel#Header { font-size: 18px; color: #a8a8a2; }
     QLabel#StatValue { font-size: 36px; font-weight: bold; color: #03DAC6; }
-    QLabel#StatLabel { font-size: 14px; color: #9E9E9E; text-transform: uppercase; }
-    QPushButton#PrimaryBtn { 
-        background-color: #BB86FC; color: #000; font-weight: bold; 
-        border-radius: 8px; padding: 15px 30px; font-size: 18px;
+    QLabel#StatLabel { font-size: 12px; color: #a8a8a2; text-transform: uppercase; font-weight: bold; }
+    QPushButton#PrimaryBtn {
+        background-color: #3584e4; color: #ffffff; font-weight: bold;
+        border-radius: 10px; padding: 15px 30px; font-size: 16px;
     }
-    QPushButton#PrimaryBtn:hover { background-color: #D7B7FD; }
-    QPushButton#SecondaryBtn { 
-        background-color: transparent; color: #BB86FC; font-weight: bold; 
-        border: 2px solid #BB86FC; border-radius: 8px; padding: 10px 20px;
+    QPushButton#PrimaryBtn:hover { background-color: #4a9af5; }
+    QPushButton#PrimaryBtn:pressed { background-color: #2a6fc4; }
+    QPushButton#SecondaryBtn {
+        background-color: transparent; color: #3584e4; font-weight: bold;
+        border: 1.5px solid #3584e4; border-radius: 8px; padding: 10px 20px;
     }
-    QPushButton#StopBtn { 
-        background-color: #CF6679; color: #000; font-weight: bold; 
+    QPushButton#SecondaryBtn:hover { background-color: rgba(53, 132, 228, 0.1); }
+    QPushButton#StopBtn {
+        background-color: #e01b24; color: #fff; font-weight: bold;
         border-radius: 8px; padding: 12px; font-size: 16px;
     }
+    QPushButton#StopBtn:hover { background-color: #f03a3a; }
 """
 
 INPUT_STYLE = """
     QLineEdit {
-        background-color: #2D2D2D; color: #E0E0E0; border: 1px solid #555;
+        background-color: #2d2d2d; color: #eeeeec; border: 1px solid #555;
         border-radius: 8px; padding: 12px; font-size: 14px;
     }
-    QLineEdit:focus { border: 1px solid #BB86FC; }
+    QLineEdit:focus { border: 1px solid #3584e4; }
+"""
+
+SIDEBAR_STYLE = """
+    QWidget#Sidebar {
+        background-color: #2d2d2d;
+        border-right: 1px solid #1a1a1a;
+    }
+"""
+
+SIDEBAR_BTN_STYLE = """
+    QPushButton {
+        background-color: transparent;
+        color: #a8a8a2;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        text-align: left;
+    }
+    QPushButton:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+        color: #eeeeec;
+    }
+"""
+
+SIDEBAR_BTN_ACTIVE_STYLE = """
+    QPushButton {
+        background-color: #3d3d3d;
+        color: #eeeeec;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        text-align: left;
+    }
 """
 
 class LoginPage(QWidget):
@@ -248,33 +288,45 @@ class InferenceThread(QThread):
         self.result_ready.emit(result)
 
 class MainPage(QWidget):
-    """프로그램 시작 메인 화면"""
+    """프로그램 시작 메인 화면 (GNOME-inspired)"""
     start_requested = pyqtSignal()
     history_requested = pyqtSignal()
     calibration_requested = pyqtSignal()
-    head_calibration_requested = pyqtSignal()
     gaze_calibration_requested = pyqtSignal()
     logout_requested = pyqtSignal()
 
-
     def __init__(self):
         super().__init__()
+        self._server_connected = False
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 30, 40, 30)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Welcome Card
-        card = QFrame()
-        card.setObjectName("Card")
-        card.setFixedSize(500, 520)
-        card_layout = QVBoxLayout(card)
-        card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.setSpacing(20)
+        content = QVBoxLayout()
+        content.setSpacing(0)
+        content.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        title = QLabel("READY TO FOCUS?")
-        title.setObjectName("Title")
-        card_layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Hero icon
+        icon_label = QLabel("\u25C9")
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setStyleSheet("""
+            font-size: 48px; color: #ffffff;
+            background-color: #772953;
+            border-radius: 20px;
+            padding: 12px;
+        """)
+        icon_label.setFixedSize(80, 80)
+        content.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        content.addSpacing(24)
 
-        desc = QLabel("Start your session to monitor productivity\nand get AI-powered feedback.")
+        # Title
+        title = QLabel("집중할 준비가 되셨나요?")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 28px; font-weight: bold; color: #eeeeec;")
+        content.addWidget(title)
+        content.addSpacing(8)
+
+        desc = QLabel("AI 시스템이 초기화되었습니다. 모니터링을 시작하려면 아래 버튼을 누르세요.")
         desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc.setStyleSheet("font-size: 16px; color: #9E9E9E;")
         card_layout.addWidget(desc)
@@ -290,49 +342,87 @@ class MainPage(QWidget):
         self.calibration_btn.clicked.connect(self.calibration_requested.emit)
         card_layout.addWidget(self.calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-
-        self.head_calibration_btn = QPushButton("머리 각도 캘리브레이션")
-        self.head_calibration_btn.setObjectName("SecondaryBtn")
-        self.head_calibration_btn.clicked.connect(self.head_calibration_requested.emit)
-        card_layout.addWidget(self.head_calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
         self.gaze_calibration_btn = QPushButton("시선 캘리브레이션")
         self.gaze_calibration_btn.setObjectName("SecondaryBtn")
         self.gaze_calibration_btn.clicked.connect(self.gaze_calibration_requested.emit)
         card_layout.addWidget(self.gaze_calibration_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-
         self.start_btn = QPushButton("START NEW SESSION")
         self.start_btn.setObjectName("PrimaryBtn")
-        self.start_btn.setEnabled(False) # Disabled by default
-        self.start_btn.setStyleSheet("QPushButton:disabled { background-color: #333; color: #666; }")
+        self.start_btn.setEnabled(False)
+        self.start_btn.setMinimumWidth(320)
+        self.start_btn.setMinimumHeight(52)
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3584e4; color: #ffffff; font-weight: bold;
+                border-radius: 12px; padding: 14px 32px; font-size: 17px;
+            }
+            QPushButton:hover { background-color: #4a9af5; }
+            QPushButton:pressed { background-color: #2a6fc4; }
+            QPushButton:disabled { background-color: #4a4a4a; color: #888; }
+        """)
         self.start_btn.clicked.connect(self.start_requested.emit)
-        card_layout.addWidget(self.start_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        content.addWidget(self.start_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        content.addSpacing(24)
 
-        self.history_btn = QPushButton("VIEW PAST HISTORY")
-        self.history_btn.setObjectName("SecondaryBtn")
-        self.history_btn.clicked.connect(self.history_requested.emit)
-        card_layout.addWidget(self.history_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Status cards row
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(16)
 
-        self.logout_btn = QPushButton("LOGOUT")
-        self.logout_btn.setStyleSheet(
-            "QPushButton { background-color: transparent; color: #9E9E9E; "
-            "font-size: 13px; border: none; padding: 8px; }"
-            "QPushButton:hover { color: #CF6679; }"
-        )
-        self.logout_btn.clicked.connect(self.logout_requested.emit)
-        card_layout.addWidget(self.logout_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Server status card
+        self.server_card = QFrame()
+        self.server_card.setObjectName("Card")
+        self.server_card.setFixedSize(200, 90)
+        sc_layout = QVBoxLayout(self.server_card)
+        sc_layout.setContentsMargins(16, 12, 16, 12)
+        sc_label = QLabel("서버 상태")
+        sc_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #E95420; text-transform: uppercase;")
+        sc_layout.addWidget(sc_label)
+        self.server_status_row = QHBoxLayout()
+        self.server_dot = QLabel("\u25CF")
+        self.server_dot.setStyleSheet("font-size: 10px; color: #e01b24;")
+        self.server_dot.setFixedWidth(14)
+        self.server_status_text = QLabel("연결 대기")
+        self.server_status_text.setStyleSheet("font-size: 16px; font-weight: bold; color: #eeeeec;")
+        self.server_status_row.addWidget(self.server_dot)
+        self.server_status_row.addWidget(self.server_status_text)
+        self.server_status_row.addStretch()
+        sc_layout.addLayout(self.server_status_row)
+        cards_row.addWidget(self.server_card)
 
-        layout.addWidget(card)
+        # AI engine card
+        ai_card = QFrame()
+        ai_card.setObjectName("Card")
+        ai_card.setFixedSize(200, 90)
+        ai_layout = QVBoxLayout(ai_card)
+        ai_layout.setContentsMargins(16, 12, 16, 12)
+        ai_label = QLabel("AI 엔진")
+        ai_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #3584e4; text-transform: uppercase;")
+        ai_layout.addWidget(ai_label)
+        ai_status_row = QHBoxLayout()
+        ai_dot = QLabel("\u25CF")
+        ai_dot.setStyleSheet("font-size: 10px; color: #33d17a;")
+        ai_dot.setFixedWidth(14)
+        ai_text = QLabel("온라인")
+        ai_text.setStyleSheet("font-size: 16px; font-weight: bold; color: #eeeeec;")
+        ai_status_row.addWidget(ai_dot)
+        ai_status_row.addWidget(ai_text)
+        ai_status_row.addStretch()
+        ai_layout.addLayout(ai_status_row)
+        cards_row.addWidget(ai_card)
+
+        content.addLayout(cards_row)
+        layout.addLayout(content)
 
     def set_connection_status(self, connected: bool):
+        self._server_connected = connected
         if connected:
-            self.status_label.setText("Server Connected")
-            self.status_label.setStyleSheet("color: #03DAC6; font-weight: bold;")
+            self.server_dot.setStyleSheet("font-size: 10px; color: #33d17a;")
+            self.server_status_text.setText("온라인")
             self.start_btn.setEnabled(True)
         else:
-            self.status_label.setText("Waiting for Orchestrator...")
-            self.status_label.setStyleSheet("color: #CF6679; font-weight: bold;")
+            self.server_dot.setStyleSheet("font-size: 10px; color: #e01b24;")
+            self.server_status_text.setText("연결 대기")
             self.start_btn.setEnabled(False)
 
 
@@ -1800,7 +1890,7 @@ class HistoryPage(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("FOCUS MONITOR PRO")
+        self.setWindowTitle("FocusGuard AI")
         self.resize(1100, 850)
         self.setStyleSheet(STYLE_SHEET)
 
@@ -1809,14 +1899,145 @@ class MainWindow(QMainWindow):
         self.is_monitoring = False
         self.current_user = None
 
-        # Pages Setup
-        self.stack = QStackedWidget()
-        self.setCentralWidget(self.stack)
+        # --- Central widget: VBox(header, HBox(sidebar, stack), statusbar) ---
+        central = QWidget()
+        self.setCentralWidget(central)
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        # Auth pages
+        # Header Bar
+        self.header_bar = QFrame()
+        self.header_bar.setFixedHeight(48)
+        self.header_bar.setStyleSheet(
+            "QFrame { background-color: #1e1e1e; border-bottom: 1px solid #1a1a1a; }"
+        )
+        hb_layout = QHBoxLayout(self.header_bar)
+        hb_layout.setContentsMargins(16, 0, 16, 0)
+        hb_layout.addStretch()
+        header_title = QLabel("FocusGuard AI (포커스가드 AI)")
+        header_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #eeeeec; letter-spacing: 1px;")
+        hb_layout.addWidget(header_title)
+        hb_layout.addStretch()
+        self.header_bar.hide()
+        root_layout.addWidget(self.header_bar)
+
+        # Middle: Sidebar + Stack
+        middle_layout = QHBoxLayout()
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.setSpacing(0)
+
+        # Sidebar
+        self.sidebar = QWidget()
+        self.sidebar.setObjectName("Sidebar")
+        self.sidebar.setFixedWidth(220)
+        self.sidebar.setStyleSheet(SIDEBAR_STYLE)
+        sb_layout = QVBoxLayout(self.sidebar)
+        sb_layout.setContentsMargins(8, 16, 8, 16)
+        sb_layout.setSpacing(4)
+
+        self.sidebar_buttons = {}
+        nav_items = [
+            ("home", "\u2302  홈"),
+            ("history", "\u29D6  기록"),
+            ("dist_calib", "\u2316  거리 캘리브레이션"),
+            ("gaze_calib", "\u25CE  시선 캘리브레이션"),
+        ]
+        for key, text in nav_items:
+            btn = QPushButton(text)
+            btn.setStyleSheet(SIDEBAR_BTN_STYLE)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            sb_layout.addWidget(btn)
+            self.sidebar_buttons[key] = btn
+
+        # Section divider
+        sb_layout.addSpacing(8)
+        divider_label = QLabel("환경 설정")
+        divider_label.setStyleSheet(
+            "font-size: 10px; font-weight: bold; color: #a8a8a2; "
+            "text-transform: uppercase; letter-spacing: 2px; padding: 8px 16px;"
+        )
+        sb_layout.addWidget(divider_label)
+
+        logout_btn = QPushButton("\u2190  로그아웃")
+        logout_btn.setStyleSheet(SIDEBAR_BTN_STYLE)
+        logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        sb_layout.addWidget(logout_btn)
+        self.sidebar_buttons["logout"] = logout_btn
+
+        sb_layout.addStretch()
+
+        # User profile area at bottom
+        self.user_profile_frame = QFrame()
+        self.user_profile_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1e1e1e;
+                border-radius: 10px;
+                border: 1px solid #1a1a1a;
+            }
+        """)
+        up_layout = QHBoxLayout(self.user_profile_frame)
+        up_layout.setContentsMargins(12, 10, 12, 10)
+        up_layout.setSpacing(10)
+        user_avatar = QLabel("\u263A")
+        user_avatar.setFixedSize(36, 36)
+        user_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        user_avatar.setStyleSheet("""
+            font-size: 18px;
+            background-color: #3584e4;
+            border-radius: 18px;
+            color: #fff;
+        """)
+        up_layout.addWidget(user_avatar)
+        user_info = QVBoxLayout()
+        user_info.setSpacing(0)
+        self.user_name_label = QLabel("사용자")
+        self.user_name_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #eeeeec;")
+        user_info.addWidget(self.user_name_label)
+        version_label = QLabel("FocusGuard v4.0")
+        version_label.setStyleSheet("font-size: 10px; color: #a8a8a2;")
+        user_info.addWidget(version_label)
+        up_layout.addLayout(user_info)
+        up_layout.addStretch()
+        sb_layout.addWidget(self.user_profile_frame)
+
+        self.sidebar.hide()
+        middle_layout.addWidget(self.sidebar)
+
+        # Pages Setup (QStackedWidget)
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet("QStackedWidget { background-color: #242424; }")
+        middle_layout.addWidget(self.stack)
+        root_layout.addLayout(middle_layout, stretch=1)
+
+        # Status Bar
+        self.status_bar_widget = QFrame()
+        self.status_bar_widget.setFixedHeight(32)
+        self.status_bar_widget.setStyleSheet(
+            "QFrame { background-color: #1e1e1e; border-top: 1px solid #1a1a1a; }"
+        )
+        stb_layout = QHBoxLayout(self.status_bar_widget)
+        stb_layout.setContentsMargins(16, 0, 16, 0)
+        self.status_dot = QLabel("\u25CF")
+        self.status_dot.setStyleSheet("font-size: 8px; color: #e01b24;")
+        self.status_dot.setFixedWidth(12)
+        stb_layout.addWidget(self.status_dot)
+        self.status_text = QLabel("연결 대기")
+        self.status_text.setStyleSheet("font-size: 11px; color: #a8a8a2;")
+        stb_layout.addWidget(self.status_text)
+        sep = QLabel("|")
+        sep.setStyleSheet("font-size: 11px; color: #555; padding: 0 4px;")
+        stb_layout.addWidget(sep)
+        ver = QLabel("FocusGuard Core v4.0")
+        ver.setStyleSheet("font-size: 11px; color: #a8a8a2;")
+        stb_layout.addWidget(ver)
+        stb_layout.addStretch()
+        self.status_bar_widget.hide()
+        root_layout.addWidget(self.status_bar_widget)
+
+        # --- Create Pages ---
         self.login_page = LoginPage(self.network_client)
         self.register_page = RegisterPage(self.network_client)
-
         self.main_page = MainPage()
         self.calibration_page = DistanceCalibrationPage(self.camera, self.network_client)
         self.head_calibration_page = HeadPoseCalibrationPage(self.camera, self.network_client)
@@ -1838,30 +2059,47 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.analysis_page)
         self.stack.addWidget(self.history_page)
 
-        # Auth Signals
+        # Auth pages (no sidebar)
+        self._auth_pages = {self.login_page, self.register_page}
+
+        # Map sidebar buttons to pages for active state
+        self._sidebar_page_map = {
+            "home": self.main_page,
+            "history": self.history_page,
+            "dist_calib": self.calibration_page,
+            "gaze_calib": self.gaze_calibration_page,
+        }
+
+        # --- Signals: Auth ---
         self.login_page.login_success.connect(self._on_login_success)
         self.login_page.register_requested.connect(lambda: self.stack.setCurrentWidget(self.register_page))
         self.register_page.register_success.connect(self._on_register_success)
         self.register_page.back_to_login.connect(lambda: self.stack.setCurrentWidget(self.login_page))
 
-        # Signals
+        # --- Signals: Sidebar Navigation ---
+        self.sidebar_buttons["home"].clicked.connect(lambda: self._navigate_to("home"))
+        self.sidebar_buttons["history"].clicked.connect(self._nav_to_history)
+        self.sidebar_buttons["dist_calib"].clicked.connect(lambda: self._navigate_to("dist_calib"))
+        self.sidebar_buttons["gaze_calib"].clicked.connect(lambda: self._navigate_to("gaze_calib"))
+        self.sidebar_buttons["logout"].clicked.connect(self._on_logout)
+
+        # --- Signals: Page Actions ---
         self.main_page.start_requested.connect(self.start_session)
         self.main_page.history_requested.connect(self.show_history)
         self.main_page.calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.calibration_page))
-        
-        self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
-        self.head_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
-        self.main_page.head_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.head_calibration_page))
         self.main_page.gaze_calibration_requested.connect(lambda: self.stack.setCurrentWidget(self.gaze_calibration_page))
         self.main_page.logout_requested.connect(self._on_logout)
         self.calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.gaze_calibration_page.done_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
         self.monitoring_page.stop_requested.connect(self.stop_session)
         self.monitoring_page.set_baseline_requested.connect(self._on_set_baseline_from_monitoring)
-        self.report_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.report_page.home_requested.connect(lambda: self._navigate_to("home"))
         self.report_page.llm_analysis_requested.connect(self.show_analysis)
-        self.analysis_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
-        self.history_page.home_requested.connect(lambda: self.stack.setCurrentWidget(self.main_page))
+        self.analysis_page.home_requested.connect(lambda: self._navigate_to("home"))
+        self.history_page.home_requested.connect(lambda: self._navigate_to("home"))
+
+        # Track page changes for sidebar active state
+        self.stack.currentChanged.connect(self._on_page_changed)
 
         # Timers
         self.preview_timer = QTimer()
@@ -1881,8 +2119,37 @@ class MainWindow(QMainWindow):
         self.distraction_count = 0
         self.current_session_id = None
 
+    def _navigate_to(self, key):
+        page = self._sidebar_page_map.get(key)
+        if page:
+            self.stack.setCurrentWidget(page)
+
+    def _nav_to_history(self):
+        self.show_history()
+
+    def _update_sidebar_active(self):
+        current = self.stack.currentWidget()
+        for key, btn in self.sidebar_buttons.items():
+            page = self._sidebar_page_map.get(key)
+            if page and page == current:
+                btn.setStyleSheet(SIDEBAR_BTN_ACTIVE_STYLE)
+            elif key != "logout":
+                btn.setStyleSheet(SIDEBAR_BTN_STYLE)
+
+    def _on_page_changed(self, index):
+        current = self.stack.currentWidget()
+        is_auth = current in self._auth_pages
+        self.header_bar.setVisible(not is_auth)
+        self.sidebar.setVisible(not is_auth)
+        self.status_bar_widget.setVisible(not is_auth)
+        if not is_auth:
+            self._update_sidebar_active()
+
     def _on_login_success(self, user_data: dict):
         self.current_user = user_data
+        # Update user profile in sidebar
+        display_name = user_data.get("display_name") or user_data.get("username") or "사용자"
+        self.user_name_label.setText(display_name)
         self.login_page.clear_fields()
         self.stack.setCurrentWidget(self.main_page)
 
@@ -1971,7 +2238,15 @@ class MainWindow(QMainWindow):
     def check_server_connection(self):
         if not self.is_monitoring:
             connected = self.network_client.check_connection()
+            # Update MainPage status cards
             self.main_page.set_connection_status(connected)
+            # Update status bar
+            if connected:
+                self.status_dot.setStyleSheet("font-size: 8px; color: #33d17a;")
+                self.status_text.setText("세션 준비됨")
+            else:
+                self.status_dot.setStyleSheet("font-size: 8px; color: #e01b24;")
+                self.status_text.setText("연결 대기")
 
     def update_ui(self):
         frame = self.camera.get_frame()
