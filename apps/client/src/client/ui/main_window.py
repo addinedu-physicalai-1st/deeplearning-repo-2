@@ -1011,6 +1011,50 @@ class HeadPoseCalibrationPage(QWidget):
             self.status_label.setText("ai_head 서버 연결 실패. 서버를 확인하세요.")
             self.status_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #f87171;")        
 
+class GazeCalibrationCanvas(QWidget):
+    """캘리브레이션 영역 전용 위젯: 검은 배경 + 빨간 목표점을 그려 가려지지 않게 함."""
+    POINTS = [
+        (0.05, 0.05), (0.5, 0.05), (0.95, 0.05),
+        (0.05, 0.5),  (0.5, 0.5),  (0.95, 0.5),
+        (0.05, 0.95), (0.5, 0.95), (0.95, 0.95),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background-color: #0a0a0f;")
+        self._point_index = 0
+        self._click_count = 0
+
+    def set_state(self, point_index: int, click_count: int):
+        self._point_index = point_index
+        self._click_count = click_count
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0:
+            painter.end()
+            return
+        if self._point_index >= len(self.POINTS):
+            painter.end()
+            return
+        rx, ry = self.POINTS[self._point_index]
+        x = int(w * rx)
+        y = int(h * ry)
+        painter.setPen(QPen(QColor("white"), 3))
+        painter.setBrush(QBrush(QColor("#ef4444")))
+        painter.drawEllipse(x - 15, y - 15, 30, 30)
+        for i in range(self._click_count):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor("#22d3ee")))
+            offset_x = x - 12 + i * 6
+            painter.drawEllipse(offset_x, y + 20, 5, 5)
+        painter.end()
+
+
 class GazeCalibrationPage(QWidget):
     """9-point 시선 캘리브레이션 화면 (외부 WebGazer 코드의 개념을 PyQt로 구현)."""
     done_requested = pyqtSignal()
@@ -1068,11 +1112,9 @@ class GazeCalibrationPage(QWidget):
 
         layout.addLayout(top_bar)
 
-        # 캘리브레이션 영역 (클릭 가능, 빨간점 표시)
-        self.calib_area = QWidget()
-        self.calib_area.setStyleSheet("background-color: #0a0a0f;")
-        self.calib_area.setMouseTracking(False)
-        layout.addWidget(self.calib_area, stretch=1)
+        # 캘리브레이션 영역: 전용 캔버스에서 빨간 점을 그려 가려지지 않게 함
+        self.calib_canvas = GazeCalibrationCanvas(self)
+        layout.addWidget(self.calib_canvas, stretch=1)
 
         # 하단 상태/컨트롤 영역
         bottom_bar = QHBoxLayout()
@@ -1114,6 +1156,7 @@ class GazeCalibrationPage(QWidget):
         self.current_click_count = 0
         self._completed = False
         self._update_progress_text()
+        self.calib_canvas.set_state(self.current_point_index, self.current_click_count)
         self.status_label.setText("준비됨")
         self.status_label.setStyleSheet("font-size: 14px; color: rgba(240, 240, 245, 0.45);")
 
@@ -1137,33 +1180,6 @@ class GazeCalibrationPage(QWidget):
         qt_img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
         self.video_label.setPixmap(QPixmap.fromImage(qt_img).scaled(
             160, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-
-    def paintEvent(self, event):
-        """현재 캘리브레이션 포인트를 빨간 점으로 표시."""
-        super().paintEvent(event)
-        if self.current_point_index >= len(self.POINTS):
-            return
-
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        rx, ry = self.POINTS[self.current_point_index]
-        x = int(self.width() * rx)
-        y = int(self.height() * ry)
-
-        # 외부 코드 스타일: 빨간 점 + 흰 테두리
-        painter.setPen(QPen(QColor("white"), 3))
-        painter.setBrush(QBrush(QColor("#a78bfa")))  # violet accent
-        painter.drawEllipse(x - 15, y - 15, 30, 30)
-
-        # 클릭 진행도 (작은 원으로 표시)
-        for i in range(self.current_click_count):
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor("#22d3ee")))
-            offset_x = x - 12 + i * 6
-            painter.drawEllipse(offset_x, y + 20, 5, 5)
-
-        painter.end()
 
     def mousePressEvent(self, event):
         """캘리브레이션 클릭 처리: iris 위치 추출 + 화면 좌표 기록."""
@@ -1210,7 +1226,7 @@ class GazeCalibrationPage(QWidget):
                 return
 
         self._update_progress_text()
-        self.update()  # repaint
+        self.calib_canvas.set_state(self.current_point_index, self.current_click_count)
 
     def _extract_iris(self, frame):
         """로컬 MediaPipe Face Mesh로 iris 정규화 위치 추출."""
@@ -2676,6 +2692,8 @@ class MainWindow(QMainWindow):
         self.history_scores = []
         self.distraction_count = 0
         self.current_session_id = None
+        self._saved_geometry = None
+        self._was_maximized = False
 
         # 버튼 프레스 애니메이션 설치
         ButtonAnimationFilter.install_on_all(self)
@@ -2709,8 +2727,27 @@ class MainWindow(QMainWindow):
         self.header_bar.setVisible(not is_auth)
         self.sidebar.setVisible(not is_auth)
         self.status_bar_widget.setVisible(not is_auth)
+        if current is not self.gaze_calibration_page:
+            self._restore_window_from_gaze_calibration()
         if not is_auth:
             self._update_sidebar_active()
+
+    def _restore_window_from_gaze_calibration(self):
+        """시선 캘리브레이션에서 나올 때 전체화면 해제 후 저장해 둔 크기/위치로 복원."""
+        if self._saved_geometry is None:
+            return
+        self.showNormal()
+        self.restoreGeometry(self._saved_geometry)
+        if self._was_maximized:
+            self.showMaximized()
+        self._saved_geometry = None
+        self._was_maximized = False
+
+    def _enter_gaze_calibration_fullscreen(self):
+        """시선 캘리브레이션 진입 시 전체화면 전환 (복원용 상태 저장)."""
+        self._was_maximized = self.isMaximized()
+        self._saved_geometry = self.saveGeometry()
+        self.showFullScreen()
 
     def _on_login_success(self, user_data: dict):
         self.current_user = user_data
@@ -2800,9 +2837,10 @@ class MainWindow(QMainWindow):
             self._navigate_to_gaze_for_flow()
 
     def _navigate_to_gaze_for_flow(self):
-        """시선 캘리브레이션 페이지로 이동 (user_id 설정 포함)."""
+        """시선 캘리브레이션 페이지로 이동 (user_id 설정 포함). 캘리브레이션 중에만 전체화면."""
         user_id = self.current_user.get("user_id") if self.current_user else None
         self.gaze_calibration_page.set_user_id(user_id)
+        self._enter_gaze_calibration_fullscreen()
         self._animated_switch(self.gaze_calibration_page)
 
     def _finalize_session_start(self):
@@ -2879,10 +2917,12 @@ class MainWindow(QMainWindow):
         self._gaze_return_to_monitoring = True
         user_id = self.current_user.get("user_id") if self.current_user else None
         self.gaze_calibration_page.set_user_id(user_id)
+        self._enter_gaze_calibration_fullscreen()
         self._animated_switch(self.gaze_calibration_page)
 
     def _on_gaze_calibration_done(self):
         """시선 캘리브레이션 완료 후 원래 페이지로 복귀."""
+        self._restore_window_from_gaze_calibration()
         if self._session_start_flow:
             if self.gaze_calibration_page._completed:
                 self._finalize_session_start()
