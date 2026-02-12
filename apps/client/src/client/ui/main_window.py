@@ -2436,6 +2436,7 @@ class DebugPage(QWidget):
             elif key == "body":
                 offset = data.get("distance_offset_cm")
                 a = data.get("shoulder_angle")
+                posture_pct = data.get("posture_percentage")
                 if offset is not None:
                     if offset > 0:
                         d_str = f"+{offset:.1f}cm (뒤)"
@@ -2447,7 +2448,8 @@ class DebugPage(QWidget):
                     d = data.get("distance_cm")
                     d_str = f"{d:.1f}cm" if d is not None else "--"
                 a_str = f"{a:.1f} deg" if a is not None else "--"
-                cell["info_label"].setText(f"이동거리: {d_str}  Angle: {a_str}")
+                posture_str = f"거북목: {int(posture_pct)}%" if posture_pct is not None else "거북목: --"
+                cell["info_label"].setText(f"이동거리: {d_str}  Angle: {a_str}  {posture_str}")
             elif key == "gaze":
                 ix = data.get("iris_x", 0)
                 iy = data.get("iris_y", 0)
