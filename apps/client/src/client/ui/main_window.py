@@ -1568,34 +1568,25 @@ class ReportPage(QWidget):
         top_bar.addWidget(home_btn)
         main_layout.addLayout(top_bar)
 
-        # Stats Card
-        stats_card = QFrame()
-        stats_card.setObjectName("Card")
-        apply_glass_shadow(stats_card)
-        stats_layout = QHBoxLayout(stats_card)
-        stats_layout.setSpacing(30)
-        stats_layout.setContentsMargins(30, 20, 30, 20)
-        
-        stats_grid = QGridLayout()
-        stats_grid.setSpacing(20)
-        self.add_report_stat(stats_grid, "DURATION", "00:00", 0, 0, "duration")
-        self.add_report_stat(stats_grid, "DISTRACTIONS", "0", 0, 1, "dist")
-        self.add_report_stat(stats_grid, "최장 집중시간", "--", 0, 2, "longest_focus")
-        self.add_report_stat(stats_grid, "평균 집중시간", "--", 0, 3, "avg_focus")
-        stats_layout.addLayout(stats_grid)
-        stats_layout.addStretch()
-        main_layout.addWidget(stats_card)
-
         # Graphs Section
         graphs_layout = QHBoxLayout()
         graphs_layout.setSpacing(15)
 
-        # Left Column: Bar Chart
+        # Left Column: 통계 + 도넛 차트 (한 카드)
         bar_card = QFrame()
         bar_card.setObjectName("Card")
         apply_glass_shadow(bar_card)
         bar_vbox = QVBoxLayout(bar_card)
         bar_vbox.setContentsMargins(15, 15, 15, 15)
+        bar_vbox.setSpacing(15)
+        # 상단: DURATION, DISTRACTIONS / 최장·평균 집중시간
+        stats_grid = QGridLayout()
+        stats_grid.setSpacing(20)
+        self.add_report_stat(stats_grid, "DURATION", "00:00", 0, 0, "duration")
+        self.add_report_stat(stats_grid, "DISTRACTIONS", "0", 0, 1, "dist")
+        self.add_report_stat(stats_grid, "최장 집중시간", "--", 1, 0, "longest_focus")
+        self.add_report_stat(stats_grid, "평균 집중시간", "--", 1, 1, "avg_focus")
+        bar_vbox.addLayout(stats_grid)
         bar_title = QLabel("집중 시간 vs 비집중 시간")
         bar_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #c084fc; margin-bottom: 10px;")
         bar_vbox.addWidget(bar_title)
@@ -1619,6 +1610,7 @@ class ReportPage(QWidget):
         line1_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #c084fc; margin-bottom: 10px;")
         line1_vbox.addWidget(line1_title)
         self.line1_plot = pg.PlotWidget()
+        self.line1_plot.setMinimumHeight(200)
         self.line1_plot.setBackground('#0d0d12')
         self.line1_plot.setLabel('left', '집중 여부')
         self.line1_plot.setLabel('bottom', '시간')
@@ -1637,13 +1629,14 @@ class ReportPage(QWidget):
         line2_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #c084fc; margin-bottom: 10px;")
         line2_vbox.addWidget(line2_title)
         self.line2_plot = pg.PlotWidget()
+        self.line2_plot.setMinimumHeight(200)
         self.line2_plot.setBackground('#0d0d12')
         self.line2_plot.setLabel('left', '횟수')
         self.line2_plot.setLabel('bottom', '')
         line2_vbox.addWidget(self.line2_plot)
         right_column.addWidget(line2_card, stretch=1)
 
-        graphs_layout.addLayout(right_column, stretch=2)
+        graphs_layout.addLayout(right_column, stretch=3)
         main_layout.addLayout(graphs_layout, stretch=1)
 
         # LLM 피드백 카드 (저장된 피드백 표시)
