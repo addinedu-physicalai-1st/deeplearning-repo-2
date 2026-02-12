@@ -74,9 +74,9 @@ baseline_distance = None  # 거북목 측정용
 baseline_distance_cm = None  # 앞뒤 이동거리 측정용 (원점)
 
 # 거북목 판단: posture_percentage가 이 값 미만이면 posture_alert
-POSTURE_DISTRACTED_THRESHOLD = float(os.getenv("POSTURE_DISTRACTED_THRESHOLD", "70"))
+POSTURE_DISTRACTED_THRESHOLD = float(os.getenv("POSTURE_DISTRACTED_THRESHOLD", "75"))
 # 거리 감소 시 최대 감점(%): 65면 100%→35% 구간 (앞으로 많이 숙이면 점수 크게 하락)
-POSTURE_DECREASE_MAX_PCT = float(os.getenv("POSTURE_DECREASE_MAX_PCT", "65"))
+POSTURE_DECREASE_MAX_PCT = float(os.getenv("POSTURE_DECREASE_MAX_PCT", "90"))
 
 async def get_api_key(header_api_key: str = Depends(api_key_header)):
     if header_api_key and secrets.compare_digest(header_api_key, API_KEY):
@@ -156,7 +156,7 @@ def process_posture(frame):
             # 기준보다 가까워지면 감점: 거리감소율 * POSTURE_DECREASE_MAX_PCT (기본 65%) → 앞으로 많이 숙이면 점수 크게 하락
             if baseline_distance is not None and distance_cm is not None:
                 distance_decrease = max(0, baseline_distance - distance_cm)
-                decrease_percentage = (distance_decrease / baseline_distance) * POSTURE_DECREASE_MAX_PCT
+                decrease_percentage = (distance_decrease / baseline_distance) * 1.5 * POSTURE_DECREASE_MAX_PCT
                 posture_percentage = 100 - decrease_percentage
                 posture_percentage = max(0, min(100, posture_percentage))
 
@@ -229,7 +229,8 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 body_pose["posture_percentage"] = float(posture_percentage)
             if distance_offset_cm is not None:
                 body_pose["distance_offset_cm"] = float(distance_offset_cm)
-            if posture_percentage is not None and posture_percentage < POSTURE_DISTRACTED_THRESHOLD:
+            # posture_percentage가 임계값 이하(<=)이면 거북목 경고
+            if posture_percentage is not None and posture_percentage <= POSTURE_DISTRACTED_THRESHOLD:
                 body_pose["posture_alert"] = True
 
         d_str = f"{distance_cm:.1f}" if distance_cm is not None else "None"
