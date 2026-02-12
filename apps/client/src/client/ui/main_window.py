@@ -1444,7 +1444,7 @@ class MonitoringPage(QWidget):
         alert_layout.addWidget(self.overlay_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         # 거북목 경고 (노란색, 2초간 표시 + 경고음, 비집중으로 카운트 안 함)
-        self.posture_alert_label = QLabel("거북목")
+        self.posture_alert_label = QLabel("자세를 바로 앉으세요")
         self.posture_alert_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.posture_alert_label.setStyleSheet("""
             background-color: rgba(245, 158, 11, 0.90);
@@ -3076,9 +3076,9 @@ class MainWindow(QMainWindow):
             m_page.stat_pose.setText("Centered")
             m_page.overlay_label.hide()
 
-        # 거북목 경고: 비집중으로 카운트하지 않고, 노란 경고 2초 + 경고음만
+        # 거북목 경고: 비집중으로 카운트하지 않고, 노란 알림창 + 경고음 (2초 후 자동 숨김)
         if result.body_pose and result.body_pose.get("posture_alert"):
-            m_page.posture_alert_label.setText("거북목")
+            m_page.posture_alert_label.setText("자세를 바로 앉으세요")
             m_page.posture_alert_label.show()
             QApplication.beep()
             QTimer.singleShot(2000, m_page.posture_alert_label.hide)

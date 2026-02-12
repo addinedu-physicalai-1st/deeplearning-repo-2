@@ -450,6 +450,13 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             # concentration_score는 0~1 범위이므로 0~100%로 변환해서 내려줌
             concentration_pct = max(0.0, min(100.0, concentration_score * 100.0))
 
+            # 30점 이하면 비집중으로 판단
+            CONCENTRATION_DISTRACTED_THRESHOLD = 30.0
+            if concentration_pct <= CONCENTRATION_DISTRACTED_THRESHOLD:
+                is_distracted = True
+                if not (head_distracted or emotion_distracted or body_distracted or gaze_distracted):
+                    status_message = "집중도 낮음"
+
             return InferenceResponse(
                 is_distracted=is_distracted,
                 status_message=status_message,

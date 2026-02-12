@@ -11,6 +11,8 @@ class PostureMonitor:
 
     REAL_SHOULDER_CM = 40.0
     FOCAL_MULTIPLIER = 1.2
+    # 거리 감소 시 최대 감점(%): 65면 100%~35% 구간 (앞으로 많이 숙이면 점수 크게 하락, ai_body와 동일)
+    POSTURE_DECREASE_MAX_PCT = 65.0
 
     def __init__(self):
         self.mp_holistic = mp.solutions.holistic
@@ -67,7 +69,7 @@ class PostureMonitor:
             if distance_cm is not None:
                 if self.baseline_distance is not None:
                     distance_decrease = max(0, self.baseline_distance - distance_cm)
-                    decrease_percentage = (distance_decrease / self.baseline_distance) * 30
+                    decrease_percentage = (distance_decrease / self.baseline_distance) * self.POSTURE_DECREASE_MAX_PCT
                     posture_percentage = 100 - decrease_percentage
                     posture_percentage = max(0, min(100, posture_percentage))
                 if self.baseline_distance_cm is not None:
