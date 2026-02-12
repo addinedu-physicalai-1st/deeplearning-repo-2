@@ -205,8 +205,9 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             # 산만한 감정 목록
             distracted_emotions = [ "distracted", "sleepy"]
             
-            # 감정명을 status_message에 직접 표시
-            status_message = emotion_data['emotion']
+            # 감정명을 한국어로 변환하여 카테고리와 함께 표시
+            _emotion_kr = {"Concentrated": "집중", "Distracted": "산만함", "Sleepy": "졸림"}
+            status_message = f"표정: {_emotion_kr.get(emotion_data['emotion'], emotion_data['emotion'])}"
             
             # 산만한 감정이 감지되면 집중하지 않은 것으로 판단
             if emotion_name in distracted_emotions:

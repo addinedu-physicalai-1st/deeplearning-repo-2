@@ -457,15 +457,15 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         else:
             if abs(yaw) > YAW_LIMIT:
                 is_distracted = True
-                reason = "Looking Away (Side)"
+                reason = "옆으로 돌림"
             elif pitch < PITCH_UP_LIMIT:
                 is_distracted = True
-                reason = "Looking Up"
+                reason = "위를 봄"
             elif pitch > PITCH_DOWN_LIMIT:
                 is_distracted = True
-                reason = "Looking Down"
+                reason = "아래를 봄"
 
-            status_message = "Focused" if not is_distracted else f"Distracted ({reason})"
+            status_message = "Focused" if not is_distracted else f"머리 방향: {reason}"
 
         # Logging for debugging
         log_status = "DISTRACTED" if is_distracted else "FOCUSED"
@@ -576,14 +576,14 @@ async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_
         if not (pitch == 0 and yaw == 0):
             if abs(yaw) > YAW_LIMIT:
                 is_distracted = True
-                reason = "Looking Away (Side)"
+                reason = "옆으로 돌림"
             elif pitch < PITCH_UP_LIMIT:
                 is_distracted = True
-                reason = "Looking Up"
+                reason = "위를 봄"
             elif pitch > PITCH_DOWN_LIMIT:
                 is_distracted = True
-                reason = "Looking Down"
-        status_message = "Focused" if not is_distracted else f"Distracted ({reason})"
+                reason = "아래를 봄"
+        status_message = "Focused" if not is_distracted else f"머리 방향: {reason}"
 
         # 상태 텍스트 표시
         color = (0, 0, 255) if is_distracted else (0, 255, 0)
