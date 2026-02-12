@@ -328,8 +328,11 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
             EMOTION_WEIGHT = 0.3
             POSITION_WEIGHT = 0.3
             HEAD_WEIGHT = 0.4
+            # 원점(캘리브레이션 값) 기준 position_score: 허용 오차(cm), 그 이상일 때 감점 스케일
+            OFFSET_TOLERANCE_CM = 5.0
+            OFFSET_SCALE_CM = 25.0
 
-            # ai_body에서 캘리브레이션한 baseline_distance_cm을 모니터 거리로 사용
+            # ai_body에서 캘리브레이션한 baseline_distance_cm을 모니터 거리로 사용 (head_gaze 투영용)
             baseline_cm = None
             if body_result:
                 baseline_cm = (body_result.get("body_pose") or {}).get("baseline_distance_cm")
@@ -357,12 +360,25 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 elif emotion_cls == "Sleepy":
                     emotion_score = 0.0
 
-            # 2) Position (body) score
+            # 2) Position (body) score: 캘리브레이션된 경우 원점(설정값) 기준 편차로 계산
             position_score = 0.5
             if body_result:
-                distance_cm = (body_result.get("body_pose") or {}).get("distance_cm")
-                if isinstance(distance_cm, (int, float)) and distance_cm > 0:
-                    position_score = 1.0 if distance_cm <= MONITOR_DISTANCE_CM else max(0.0, 1.0 - (distance_cm - MONITOR_DISTANCE_CM) / MONITOR_DISTANCE_CM)
+                body_pose = body_result.get("body_pose") or {}
+                baseline_cm_pose = body_pose.get("baseline_distance_cm")
+                distance_offset_cm = body_pose.get("distance_offset_cm")
+                if (
+                    isinstance(baseline_cm_pose, (int, float))
+                    and baseline_cm_pose > 0
+                    and distance_offset_cm is not None
+                ):
+                    abs_offset = abs(float(distance_offset_cm))
+                    if abs_offset <= OFFSET_TOLERANCE_CM:
+                        position_score = 1.0
+                    else:
+                        position_score = max(
+                            0.0,
+                            1.0 - (abs_offset - OFFSET_TOLERANCE_CM) / OFFSET_SCALE_CM,
+                        )
 
             # 3) Head + gaze score
             head_gaze_score = 0.5

@@ -69,8 +69,9 @@ holistic = mp_holistic.Holistic(
 )
 
 # 정자세 기준값 (세션별로 관리하지 않고 전역으로 사용)
+# ai_interface에서 이 값을 원점(origin)으로 사용해 position_score를 distance_offset_cm 기준으로 계산함.
 baseline_distance = None  # 거북목 측정용
-baseline_distance_cm = None  # 앞뒤 이동거리 측정용
+baseline_distance_cm = None  # 앞뒤 이동거리 측정용 (원점)
 
 # 거북목 판단 임시 기준: posture_percentage가 이 값 미만이면 비집중 (나중에 수치 조정)
 POSTURE_DISTRACTED_THRESHOLD = float(os.getenv("POSTURE_DISTRACTED_THRESHOLD", "70"))
@@ -157,7 +158,7 @@ def process_posture(frame):
                 posture_percentage = 100 - decrease_percentage
                 posture_percentage = max(0, min(100, posture_percentage))
 
-            # 앞뒤 이동거리 측정
+            # 앞뒤 이동거리 측정: 정자세(캘리브레이션) 거리를 0으로 둠. 가까우면 음수(-1,-2,…), 멀면 양수(1,2,3,…)
             if baseline_distance_cm is not None:
                 distance_offset_cm = distance_cm - baseline_distance_cm
 
@@ -252,8 +253,8 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
 @app.post("/set_baseline")
 async def set_baseline(request: InferenceRequest, api_key: str = Depends(get_api_key)):
     """
-    정자세 기준값 설정
-    현재 프레임의 거리를 기준으로 설정합니다.
+    정자세 기준값(원점) 설정.
+    현재 프레임의 거리를 원점으로 저장하며, ai_interface는 이 원점 대비 distance_offset_cm으로 position_score를 계산합니다.
     """
     global baseline_distance, baseline_distance_cm
     
@@ -286,16 +287,16 @@ async def set_baseline(request: InferenceRequest, api_key: str = Depends(get_api
 async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_api_key)):
     """디버그용: 추론 결과 + 어깨선·거리가 그려진 어노테이션 이미지를 반환."""
     if not request.image_base64:
-        return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+        return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None, "distance_offset_cm": None}, "annotated_image": None}
 
     try:
         try:
             img_data = base64.b64decode(request.image_base64)
         except Exception:
-            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None, "distance_offset_cm": None}, "annotated_image": None}
 
         if len(img_data) < 4:
-            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None, "distance_offset_cm": None}, "annotated_image": None}
 
         is_valid_image = (
             img_data.startswith(b'\xff\xd8\xff') or
@@ -303,12 +304,12 @@ async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_
             img_data.startswith(b'RIFF')
         )
         if not is_valid_image:
-            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None, "distance_offset_cm": None}, "annotated_image": None}
 
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if frame is None:
-            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+            return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None, "distance_offset_cm": None}, "annotated_image": None}
 
         debug_frame = frame.copy()
         shoulder_angle, distance_cm, posture_percentage, distance_offset_cm, shoulder_coords = process_posture(frame)
@@ -340,7 +341,7 @@ async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_
 
     except Exception as e:
         logger.exception(f"[!] Debug Inference Error: {e}")
-        return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None}, "annotated_image": None}
+        return {"data": {"shoulder_angle": None, "distance_cm": None, "posture_percentage": None, "distance_offset_cm": None}, "annotated_image": None}
 
 
 if __name__ == "__main__":

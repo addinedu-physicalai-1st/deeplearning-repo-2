@@ -737,7 +737,15 @@ class DistanceCalibrationPage(QWidget):
         else:
             self.shoulder_label.setText("어깨 각도: --°")
 
-        if distance_cm is not None:
+        # 정자세 설정 후: 이동거리 0 기준, 가까우면 음수(앞), 멀면 양수(뒤)
+        if distance_offset_cm is not None:
+            if distance_offset_cm > 0:
+                self.distance_label.setText(f"이동거리: +{distance_offset_cm:.1f} cm (뒤)")
+            elif distance_offset_cm < 0:
+                self.distance_label.setText(f"이동거리: {distance_offset_cm:.1f} cm (앞)")
+            else:
+                self.distance_label.setText("이동거리: 0.0 cm")
+        elif distance_cm is not None:
             self.distance_label.setText(f"거리: {distance_cm:.1f} cm")
         else:
             self.distance_label.setText("거리: -- cm")
@@ -2367,11 +2375,20 @@ class DebugPage(QWidget):
                 conf = data.get("confidence", 0)
                 cell["info_label"].setText(f"{emo} ({conf:.0%})" if emo else "No detection")
             elif key == "body":
-                d = data.get("distance_cm")
+                offset = data.get("distance_offset_cm")
                 a = data.get("shoulder_angle")
-                d_str = f"{d:.1f}cm" if d is not None else "--"
+                if offset is not None:
+                    if offset > 0:
+                        d_str = f"+{offset:.1f}cm (뒤)"
+                    elif offset < 0:
+                        d_str = f"{offset:.1f}cm (앞)"
+                    else:
+                        d_str = "0.0cm"
+                else:
+                    d = data.get("distance_cm")
+                    d_str = f"{d:.1f}cm" if d is not None else "--"
                 a_str = f"{a:.1f} deg" if a is not None else "--"
-                cell["info_label"].setText(f"Distance: {d_str}  Angle: {a_str}")
+                cell["info_label"].setText(f"이동거리: {d_str}  Angle: {a_str}")
             elif key == "gaze":
                 ix = data.get("iris_x", 0)
                 iy = data.get("iris_y", 0)
