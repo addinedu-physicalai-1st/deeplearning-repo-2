@@ -196,8 +196,8 @@ def draw_pose_axes(frame, nose_px, pitch, yaw, roll, axis_length=80,
         cv2.arrowedLine(frame, origin, z_end, (255, 0, 0), 3, tipLength=0.2)
 
     # 각도 텍스트 표시
-    cv2.putText(frame, f"P:{pitch:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.putText(frame, f"Y:{yaw:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    cv2.putText(frame, f"P:{pitch:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    cv2.putText(frame, f"Y:{yaw:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     cv2.putText(frame, f"R:{roll:.1f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
 
