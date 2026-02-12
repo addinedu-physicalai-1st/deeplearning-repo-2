@@ -6,7 +6,7 @@ import logging
 import numpy as np
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame, QGridLayout, QStackedWidget, QMessageBox, QApplication, QProgressBar, QDateEdit, QScrollArea, QLineEdit, QSizePolicy, QGraphicsOpacityEffect, QGraphicsDropShadowEffect
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QPropertyAnimation, QRect, QRectF, QEasingCurve, QDate, QElapsedTimer, QEvent, QObject
-from PyQt6.QtGui import QImage, QPixmap, QColor, QFont, QPainter, QPen, QBrush, QPainterPath, QPalette
+from PyQt6.QtGui import QImage, QPixmap, QColor, QFont, QPainter, QPen, QBrush, QPainterPath, QPalette, QLinearGradient
 import pyqtgraph as pg
 pg.setConfigOption('foreground', (240, 240, 245, 140))
 pg.setConfigOption('background', '#0d0d12')
@@ -236,6 +236,72 @@ def apply_glass_shadow(widget, blur=30, y=4, color=QColor(0, 0, 0, 80)):
     widget.setGraphicsEffect(shadow)
 
 
+class FocusMonitorIcon(QWidget):
+    """모니터 + 포커스 컨셉의 커스텀 아이콘 위젯."""
+
+    def __init__(self, size=96, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._size = size
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        s = self._size
+
+        # 배경: 보라색 그라데이션 둥근 사각형
+        bg_grad = QLinearGradient(0, 0, s, s)
+        bg_grad.setColorAt(0, QColor("#6366f1"))
+        bg_grad.setColorAt(1, QColor("#8b5cf6"))
+        p.setBrush(QBrush(bg_grad))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(0, 0, s, s, s * 0.29, s * 0.29)
+
+        # 모니터 본체 (둥근 사각형)
+        mon_w = s * 0.58
+        mon_h = s * 0.40
+        mon_x = (s - mon_w) / 2
+        mon_y = s * 0.18
+        pen = QPen(QColor("#ffffff"), s * 0.025)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(QBrush(QColor(255, 255, 255, 18)))
+        p.drawRoundedRect(QRectF(mon_x, mon_y, mon_w, mon_h), s * 0.04, s * 0.04)
+
+        # 모니터 스탠드 (세로 막대 + 받침)
+        stand_cx = s / 2
+        stand_top = mon_y + mon_h
+        stand_bot = stand_top + s * 0.10
+        p.setPen(QPen(QColor("#ffffff"), s * 0.025, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawLine(int(stand_cx), int(stand_top), int(stand_cx), int(stand_bot))
+        base_w = s * 0.22
+        p.drawLine(int(stand_cx - base_w / 2), int(stand_bot), int(stand_cx + base_w / 2), int(stand_bot))
+
+        # 화면 안 포커스 타겟 (동심원 + 십자선)
+        cx = s / 2
+        cy = mon_y + mon_h / 2
+        r_outer = min(mon_w, mon_h) * 0.32
+        r_inner = r_outer * 0.45
+
+        target_pen = QPen(QColor("#ffffff"), s * 0.02)
+        p.setPen(target_pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QRectF(cx - r_outer, cy - r_outer, r_outer * 2, r_outer * 2))
+        p.drawEllipse(QRectF(cx - r_inner, cy - r_inner, r_inner * 2, r_inner * 2))
+
+        # 십자선
+        cross_len = r_outer * 1.3
+        p.drawLine(int(cx - cross_len), int(cy), int(cx + cross_len), int(cy))
+        p.drawLine(int(cx), int(cy - cross_len), int(cx), int(cy + cross_len))
+
+        # 중심점
+        p.setBrush(QBrush(QColor("#ffffff")))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QRectF(cx - s * 0.02, cy - s * 0.02, s * 0.04, s * 0.04))
+
+        p.end()
+
+
 class SplashPage(QWidget):
     """앱 시작 시 프로그램명 + 팀명을 보여주는 스플래시 화면."""
     finished = pyqtSignal()
@@ -247,15 +313,8 @@ class SplashPage(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # 아이콘
-        icon_label = QLabel("\U0001f9e0")
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setStyleSheet("""
-            font-size: 56px; color: #ffffff;
-            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6366f1, stop:1 #8b5cf6);
-            border-radius: 28px; padding: 16px;
-        """)
-        icon_label.setFixedSize(96, 96)
-        layout.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        icon_widget = FocusMonitorIcon(96)
+        layout.addWidget(icon_widget, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addSpacing(32)
 
         # 프로그램명
