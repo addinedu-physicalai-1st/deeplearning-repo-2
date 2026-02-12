@@ -1327,6 +1327,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "monitor-shared" },
     { name = "opencv-python" },
+    { name = "pillow" },
     { name = "python-dotenv" },
     { name = "torch", version = "2.1.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
@@ -1339,6 +1340,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.95.0" },
     { name = "monitor-shared", editable = "packages/shared" },
     { name = "opencv-python", specifier = ">=4.8.0" },
+    { name = "pillow", specifier = ">=9.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.4.0" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = "==2.1.2" },
@@ -1384,6 +1386,7 @@ source = { virtual = "apps/ai_head" }
 dependencies = [
     { name = "fastapi" },
     { name = "monitor-shared" },
+    { name = "pillow" },
     { name = "python-dotenv" },
     { name = "torch", version = "2.1.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
@@ -1395,6 +1398,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.95.0" },
     { name = "monitor-shared", editable = "packages/shared" },
+    { name = "pillow", specifier = ">=9.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.4.0" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = "==2.1.2" },

@@ -6,6 +6,7 @@ import base64
 import logging
 import secrets
 from pathlib import Path
+from PIL import ImageFont, ImageDraw, Image
 from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.security.api_key import APIKeyHeader
 from shared.schemas import InferenceRequest, InferenceResponse
@@ -98,6 +99,31 @@ def _get_camera_matrix(img_w, img_h):
     ], dtype=np.float64)
 
 THRESHOLDS_PATH = Path(__file__).resolve().parent.parent.parent / "thresholds.json"
+
+# 한글 폰트 로드 (시스템 Noto Sans CJK 사용)
+_KOREAN_FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+_korean_font_cache: dict[int, ImageFont.FreeTypeFont] = {}
+
+
+def _get_korean_font(size: int = 24) -> ImageFont.FreeTypeFont:
+    """크기별 한글 폰트를 캐싱하여 반환."""
+    if size not in _korean_font_cache:
+        try:
+            _korean_font_cache[size] = ImageFont.truetype(_KOREAN_FONT_PATH, size)
+        except OSError:
+            _korean_font_cache[size] = ImageFont.load_default()
+    return _korean_font_cache[size]
+
+
+def put_korean_text(frame, text, pos, font_size=24, color=(0, 255, 0)):
+    """PIL을 사용하여 프레임에 한글 텍스트를 렌더링."""
+    img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(img_pil)
+    font = _get_korean_font(font_size)
+    # OpenCV BGR 색상을 RGB로 변환
+    rgb_color = (color[2], color[1], color[0])
+    draw.text(pos, text, font=font, fill=rgb_color)
+    frame[:] = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
 def _load_thresholds_from_file():
@@ -415,8 +441,8 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         
         if not results[0].boxes or results[0].boxes.id is None:
             return InferenceResponse(
-                is_distracted=True, 
-                status_message="No person detected"
+                is_distracted=True,
+                status_message="사람 감지 안됨"
             )
 
         boxes = results[0].boxes
@@ -438,7 +464,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
         try:
             current_idx = list(ids).index(target_id)
         except ValueError:
-            return InferenceResponse(is_distracted=True, status_message="Target lost")
+            return InferenceResponse(is_distracted=True, status_message="대상 추적 실패")
 
         # Pose Estimation
         target_kpts = keypoints_data[current_idx]
@@ -453,7 +479,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
 
         if pitch == 0 and yaw == 0:
             is_distracted = False
-            status_message = "Focused (Searching...)"
+            status_message = "집중 (탐색 중...)"
         else:
             if abs(yaw) > YAW_LIMIT:
                 is_distracted = True
@@ -465,7 +491,7 @@ async def inference(request: InferenceRequest, api_key: str = Depends(get_api_ke
                 is_distracted = True
                 reason = "아래를 봄"
 
-            status_message = "Focused" if not is_distracted else f"머리 방향: {reason}"
+            status_message = "집중" if not is_distracted else f"머리 방향: {reason}"
 
         # Logging for debugging
         log_status = "DISTRACTED" if is_distracted else "FOCUSED"
@@ -522,9 +548,9 @@ async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_
         results = model.track(frame, persist=True, verbose=False)
 
         if not results[0].boxes or results[0].boxes.id is None:
-            cv2.putText(debug_frame, "No person detected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            put_korean_text(debug_frame, "사람 감지 안됨", (10, 20), font_size=24, color=(0, 0, 255))
             return {
-                "data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": True, "status_message": "No person detected"},
+                "data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": True, "status_message": "사람 감지 안됨"},
                 "annotated_image": encode_frame_to_base64(debug_frame)
             }
 
@@ -544,9 +570,9 @@ async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_
         try:
             current_idx = list(ids).index(target_id)
         except ValueError:
-            cv2.putText(debug_frame, "Target lost", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            put_korean_text(debug_frame, "대상 추적 실패", (10, 20), font_size=24, color=(0, 0, 255))
             return {
-                "data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": True, "status_message": "Target lost"},
+                "data": {"pitch": 0, "yaw": 0, "roll": 0, "is_distracted": True, "status_message": "대상 추적 실패"},
                 "annotated_image": encode_frame_to_base64(debug_frame)
             }
 
@@ -583,11 +609,11 @@ async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_
             elif pitch > PITCH_DOWN_LIMIT:
                 is_distracted = True
                 reason = "아래를 봄"
-        status_message = "Focused" if not is_distracted else f"머리 방향: {reason}"
+        status_message = "집중" if not is_distracted else f"머리 방향: {reason}"
 
-        # 상태 텍스트 표시
+        # 상태 텍스트 표시 (한글 지원)
         color = (0, 0, 255) if is_distracted else (0, 255, 0)
-        cv2.putText(debug_frame, status_message, (10, img_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        put_korean_text(debug_frame, status_message, (10, img_h - 40), font_size=24, color=color)
 
         return {
             "data": {

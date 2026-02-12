@@ -4,6 +4,7 @@ import numpy as np
 import base64
 import logging
 import secrets
+from PIL import ImageFont, ImageDraw, Image
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security.api_key import APIKeyHeader
 from shared.schemas import InferenceRequest, InferenceResponse
@@ -64,6 +65,33 @@ app.add_middleware(LimitUploadSize, max_upload_size=10_000_000) # 10MB
 # 모델 파일은 apps/ai_emotion/best.pt에 위치해야 함
 model = YOLO('best.pt')
 
+# 감정 클래스명 한글 매핑
+EMOTION_KR = {"Concentrated": "집중", "Distracted": "산만함", "Sleepy": "졸림"}
+
+# 한글 폰트 로드 (시스템 Noto Sans CJK 사용)
+_KOREAN_FONT_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+_korean_font_cache: dict[int, ImageFont.FreeTypeFont] = {}
+
+
+def _get_korean_font(size: int = 24) -> ImageFont.FreeTypeFont:
+    if size not in _korean_font_cache:
+        try:
+            _korean_font_cache[size] = ImageFont.truetype(_KOREAN_FONT_PATH, size)
+        except OSError:
+            _korean_font_cache[size] = ImageFont.load_default()
+    return _korean_font_cache[size]
+
+
+def put_korean_text(frame, text, pos, font_size=24, color=(0, 255, 0)):
+    """PIL을 사용하여 프레임에 한글 텍스트를 렌더링."""
+    img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(img_pil)
+    font = _get_korean_font(font_size)
+    rgb_color = (color[2], color[1], color[0])
+    draw.text(pos, text, font=font, fill=rgb_color)
+    frame[:] = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+
+
 async def get_api_key(header_api_key: str = Depends(api_key_header)):
     if header_api_key and secrets.compare_digest(header_api_key, API_KEY):
         return header_api_key
@@ -95,6 +123,7 @@ def draw_emotion_boxes(frame, results):
         x1, y1, x2, y2 = map(int, xyxy[i])
         conf = confidences[i]
         cls_name = class_names.get(int(classes[i]), f"class_{classes[i]}")
+        kr_name = EMOTION_KR.get(cls_name, cls_name)
 
         # 클래스별 색상
         if cls_name.lower() == "concentrated":
@@ -105,10 +134,13 @@ def draw_emotion_boxes(frame, results):
             color = (0, 165, 255)    # 주황 (Distracted 등)
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        label = f"{cls_name} {conf:.2f}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-        cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), color, -1)
-        cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        label = f"{kr_name} {conf:.2f}"
+        # 한글 라벨을 바운딩 박스 위에 렌더링
+        font = _get_korean_font(20)
+        bbox = font.getbbox(label)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        cv2.rectangle(frame, (x1, y1 - th - 14), (x1 + tw + 4, y1), color, -1)
+        put_korean_text(frame, label, (x1 + 2, y1 - th - 12), font_size=20, color=(255, 255, 255))
 
 
 def extract_emotion_from_results(results):
@@ -279,14 +311,16 @@ async def debug_inference(request: InferenceRequest, api_key: str = Depends(get_
             if emotion_name in distracted_emotions:
                 is_distracted = True
 
-            # 상태 텍스트 표시
+            # 상태 텍스트 표시 (한글 지원)
             color = (0, 0, 255) if is_distracted else (0, 255, 0)
-            status_text = f"{emotion_data['emotion']} | {'Distracted' if is_distracted else 'Focused'}"
-            cv2.putText(debug_frame, status_text, (10, debug_frame.shape[0] - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            kr_emotion = EMOTION_KR.get(emotion_data['emotion'], emotion_data['emotion'])
+            kr_status = "산만" if is_distracted else "집중"
+            status_text = f"{kr_emotion} | {kr_status}"
+            put_korean_text(debug_frame, status_text, (10, debug_frame.shape[0] - 40),
+                            font_size=24, color=color)
         else:
-            cv2.putText(debug_frame, "No face detected", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            put_korean_text(debug_frame, "얼굴 감지 안됨", (10, 20),
+                            font_size=24, color=(0, 0, 255))
 
         return {
             "data": {

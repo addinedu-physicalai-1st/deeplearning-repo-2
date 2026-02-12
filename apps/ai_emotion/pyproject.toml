@@ -13,6 +13,7 @@ dependencies = [
     "torch==2.1.2; sys_platform == 'darwin'",
     "torch>=2.4.0; sys_platform != 'darwin'",
     "opencv-python>=4.8.0",
+    "Pillow>=9.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -12,6 +12,7 @@ dependencies = [
     "ultralytics>=8.4.9",
     "torch==2.1.2; sys_platform == 'darwin'",
     "torch>=2.4.0; sys_platform != 'darwin'",
+    "Pillow>=9.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]
